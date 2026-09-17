@@ -5,7 +5,7 @@ from pydantic.alias_generators import to_camel
 class DocumentDraftRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
     document_type: str  # 진정서, 고소장 등
-    case_id: str | None = None
+    case_id: int | None = None  # DB BIGINT 타입과 매칭
     summary: str
     ocr_texts: list[str] = []
     additional_context: dict | None = None

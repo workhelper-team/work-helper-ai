@@ -23,7 +23,7 @@ async def handle_create_petition(
     try:
         # 명세 DTO(DocumentDraftRequest)를 기존 서비스 파이프라인 입력(PetitionCreateRequest)으로 변환
         petition_request = PetitionCreateRequest(
-            case_id=request.case_id or "",
+            case_id=str(request.case_id) if request.case_id is not None else "",
             petitioner_name=(request.additional_context or {}).get("petitioner_name", ""),
             respondent_name=(request.additional_context or {}).get("respondent_name"),
             summary=request.summary,
