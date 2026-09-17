@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException, status
-from app.schemas.rag_schema import ConsultationRequest, ConsultationResponse
+from app.schemas.consultation_schema import ConsultationRequest, ConsultationResponse
 from app.services.rag_service import generate_legal_consultation
 
 router = APIRouter()
 
 
 @router.post(
-    "/chat",
+    "",
     response_model=ConsultationResponse,
     status_code=status.HTTP_200_OK,
     summary="노동법 법률 상담 질의응답 (RAG)",

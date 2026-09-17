@@ -1,14 +1,14 @@
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from app.schemas.ocr_schema import OCRDocumentType, OCRResponse
+from app.schemas.ocr_schema import EvidenceAnalysisResponse, OCRDocumentType
 from app.services.ocr_service import extract_text_from_document
 
 router = APIRouter()
 
 
 @router.post(
-    "/extract",
-    response_model=OCRResponse,
+    "",
+    response_model=EvidenceAnalysisResponse,
     status_code=status.HTTP_200_OK,
     summary="증거 서류 텍스트 추출 (OCR)",
     description="근로계약서, 임금명세서, 카카오톡 캡처 이미지(또는 PDF)를 업로드받아 텍스트를 추출합니다.",
@@ -19,7 +19,7 @@ async def extract_document_text(
         OCRDocumentType.IMAGE,
         description="문서 유형 (image 또는 pdf)",
     ),
-) -> OCRResponse:
+) -> EvidenceAnalysisResponse:
     # 1. 지원 확장자 검증
     allowed_extensions = ["png", "jpg", "jpeg", "pdf"]
     filename = file.filename or "unknown_file"
@@ -47,7 +47,13 @@ async def extract_document_text(
             filename=filename,
             document_type=document_type,
         )
-        return result
+        # 내부 OCR 결과를 명세 규격(EvidenceAnalysisResponse)으로 변환
+        return EvidenceAnalysisResponse(
+            extracted_text=result.extracted_text,
+            analysis_result={"confidence": result.confidence, "document_id": result.document_id},
+            success=result.success,
+            message=result.message or "증거 이미지 분석이 완료되었습니다.",
+        )
 
     except HTTPException:
         raise

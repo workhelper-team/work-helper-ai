@@ -4,11 +4,16 @@ from langchain_core.output_parsers import StrOutputParser
 from app.db.vector_client import get_retriever
 from app.services.llm_service import get_llm
 from app.prompts.consultation_prompt import get_consultation_prompt_template
-from app.schemas.rag_schema import ConsultationRequest, ConsultationResponse, LegalReference
+# consultation_schema에서 DTO 임포트
+from app.schemas.consultation_schema import (
+    ConsultationRequest,
+    ConsultationResponse,
+    LegalReference,
+    StructuredConsultationResult,
+)
 
 
 def format_docs(docs) -> str:
-    """검색된 문서 청크들을 프롬프트 주입용 단일 문자열로 가공합니다."""
     formatted_chunks = []
     for doc in docs:
         law = doc.metadata.get("law", "법률")
@@ -19,13 +24,12 @@ def format_docs(docs) -> str:
 
 
 def parse_legal_references(docs) -> List[LegalReference]:
-    """검색된 문서들의 메타데이터를 기반으로 LegalReference 리스트를 구성합니다."""
     references = []
     for doc in docs:
         law = str(doc.metadata.get("law", "관련 법령"))
         article_val = doc.metadata.get("article")
         article = str(article_val) if article_val is not None else None
-        
+
         references.append(
             LegalReference(
                 law=law,
@@ -37,7 +41,6 @@ def parse_legal_references(docs) -> List[LegalReference]:
 
 
 async def generate_legal_consultation(request: ConsultationRequest) -> ConsultationResponse:
-    """RAG 파이프라인을 실행하여 구조화된 법률 상담 응답을 생성합니다."""
     retriever = get_retriever(k=3)
     docs = retriever.invoke(request.question)
 
@@ -54,8 +57,8 @@ async def generate_legal_consultation(request: ConsultationRequest) -> Consultat
 
     references = parse_legal_references(docs)
 
-    return ConsultationResponse(
-        answer=raw_answer.strip(),
+    # INT-AI-001 명세에 맞춰 structured_result 객체로 패키징
+    structured_data = StructuredConsultationResult(
         issues=["임금/수당 미지급", "근로시간 판단"] if "주휴" in request.question or "수당" in request.question else ["노동관계법 검토"],
         references=references,
         follow_up_questions=[
@@ -64,4 +67,9 @@ async def generate_legal_consultation(request: ConsultationRequest) -> Consultat
         ] if "주휴" in request.question else [
             "구체적인 근로계약서 작성 여부와 사업장 상시 근로자 수를 알려주실 수 있나요?"
         ],
+    )
+
+    return ConsultationResponse(
+        answer=raw_answer.strip(),
+        structured_result=structured_data,
     )

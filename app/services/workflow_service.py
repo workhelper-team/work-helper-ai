@@ -9,7 +9,7 @@ from app.schemas.petition_schema import (
     PetitionCreateResponse,
     PetitionDocument,
 )
-from app.schemas.rag_schema import ConsultationRequest
+from app.schemas.consultation_schema import ConsultationRequest
 from app.services.llm_service import get_llm
 from app.services.rag_service import generate_legal_consultation
 from app.services.ocr_service import extract_text_from_document
@@ -23,7 +23,7 @@ async def create_petition(request: PetitionCreateRequest) -> PetitionCreateRespo
     rag_response = await generate_legal_consultation(
         ConsultationRequest(question=request.summary)
     )
-    legal_references = [item.law for item in rag_response.references]
+    legal_references = [item.law for item in rag_response.structured_result.references]
 
     # 2. 진정서 프롬프트 구성
     user_prompt = build_petition_user_prompt(

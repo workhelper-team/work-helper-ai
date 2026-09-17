@@ -15,7 +15,7 @@ if settings.BACKEND_CORS_ORIGINS:
         allow_headers=["*"],
     )
 
-app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix="/internal/ai")
 
 # 루트 엔드포인트
 @app.get("/", summary="루트 엔드포인트")

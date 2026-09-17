@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.schemas.rag_schema import ConsultationRequest, ConsultationResponse
+from app.schemas.consultation_schema import ConsultationRequest, ConsultationResponse
 from app.services.rag_service import generate_legal_consultation
 
 router = APIRouter()
