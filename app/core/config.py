@@ -1,13 +1,15 @@
+from pathlib import Path
 from typing import List
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Settings(BaseSettings):
     """애플리케이션 전역 환경 설정."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
@@ -56,7 +58,14 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_NAME: str = "jhgan/ko-sroberta-multitask"
 
     # --- Vision & OCR ---
-    OCR_ENGINE: str = "tesseract"
+    # OCR 엔진 선택 (기본 파이프라인 연동 완료: "tesseract" | "paddleocr")
+    # 로컬 테스트 시에는 .env의 OCR_ENGINE 값이 우선 적용됩니다.
+    OCR_ENGINE: str = "paddleocr"
+
+    # PaddleOCR의 oneDNN(MKL-DNN) 가속 백엔드 사용 여부.
+    # 일부 CPU 환경에서 oneDNN 백엔드가 NotImplementedError를 발생시키므로 기본값은 False.
+    # 정상 동작하는 환경에서는 .env에서 true로 바꿔 추론 속도를 높일 수 있습니다.
+    OCR_PADDLE_ENABLE_MKLDNN: bool = False
 
 
 settings = Settings()
