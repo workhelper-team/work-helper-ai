@@ -1,45 +1,50 @@
 from fastapi import APIRouter, HTTPException, status
 from app.schemas.petition_schema import (
-    DocumentDraftRequest,
-    DocumentDraftResponse,
-    PetitionCreateRequest,
+    PetitionDraftRequest,
+    PetitionDraftResponse,
+    GeneratedPetitionContent,
 )
-from app.services.workflow_service import create_petition
 
 router = APIRouter()
 
 
 @router.post(
     "",
-    response_model=DocumentDraftResponse,
+    response_model=PetitionDraftResponse,
     status_code=status.HTTP_200_OK,
-    summary="대응 문서 초안 생성",
-    description="사건 정보 및 OCR 추출 텍스트를 기반으로 노동청 제출용 대응 문서 초안을 작성합니다.",
+    summary="고용노동부 임금체불 진정서 초안 작성",
+    description="진정인/피진정인 정형 데이터, 사용자 정황 서술, OCR 증거 텍스트를 결합하여 진정서 상세 서식 및 진정 사유를 완성합니다.",
 )
-# 함수 이름을 엔드포인트 전용 핸들러명으로 변경하여 서비스 함수와 충돌 방지
 async def handle_create_petition(
-    request: DocumentDraftRequest,
-) -> DocumentDraftResponse:
+    request: PetitionDraftRequest,
+) -> PetitionDraftResponse:
     try:
-        # 명세 DTO(DocumentDraftRequest)를 기존 서비스 파이프라인 입력(PetitionCreateRequest)으로 변환
-        petition_request = PetitionCreateRequest(
-            case_id=str(request.case_id) if request.case_id is not None else "",
-            petitioner_name=(request.additional_context or {}).get("petitioner_name", ""),
-            respondent_name=(request.additional_context or {}).get("respondent_name"),
-            summary=request.summary,
-            ocr_texts=list(request.ocr_texts),
-            additional_context=str(request.additional_context) if request.additional_context else None,
+        # TODO: 2~4단계(OCR 후처리, 결측치 보정, LLM 진정 사유 생성 체인) 로직 호출부 연결 예정
+        # 임시 스텁 응답 생성 (총 체불액 단순 계산 및 기본 구조 반환)
+        total_amount = (
+            request.facts.unpaid_wages
+            + request.facts.unpaid_severance_pay
+            + request.facts.unpaid_other_amount
         )
-        result = await create_petition(petition_request)
-        # 서비스 결과(PetitionCreateResponse)를 명세 규격(DocumentDraftResponse)으로 변환
-        return DocumentDraftResponse(
-            document_type=request.document_type,
-            content=result.document.body,
-            success=result.success,
-            message=result.message or "대응 문서 초안 생성이 완료되었습니다.",
+
+        dummy_content = GeneratedPetitionContent(
+            claim_reason="[초안 생성 대기] 전달받은 정황 및 증거 문서를 바탕으로 고용노동부 제출용 육하원칙 진정 사유가 생성될 예정입니다.",
+            target_labor_office="관할 노동관서 자동 판별 대기",
+            total_unpaid_amount=total_amount,
+            inferred_facts=None,
         )
+
+        return PetitionDraftResponse(
+            success=True,
+            case_id=request.case_id,
+            complainant=request.complainant,
+            respondent=request.respondent,
+            facts=request.facts,
+            content=dummy_content,
+        )
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"진정서 생성 중 오류가 발생했습니다: {str(e)}",
+            detail=f"진정서 초안 생성 중 오류가 발생했습니다: {str(e)}",
         )
