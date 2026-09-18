@@ -1,7 +1,22 @@
 from typing import List, Optional
+from pydantic import BaseModel, Field, ConfigDict
+from pydantic.alias_generators import to_camel
 
-from pydantic import BaseModel, Field
+class DocumentDraftRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    document_type: str  # 진정서, 고소장 등
+    case_id: int | None = None  # DB BIGINT 타입과 매칭
+    summary: str
+    ocr_texts: list[str] = []
+    additional_context: dict | None = None
 
+
+class DocumentDraftResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    document_type: str
+    content: str
+    success: bool = True
+    message: str = "대응 문서 초안 생성이 완료되었습니다."
 
 class PetitionCreateRequest(BaseModel):
     """진정서 자동 작성을 위한 입력 데이터 스키마."""

@@ -25,3 +25,6 @@ pgvector>=0.2.5
 # --- Embeddings (CPU-friendly) ---
 sentence-transformers>=3.0.0
 huggingface-hub>=0.23.0
+
+# --- OCR ---
+python-multipart>=0.0.9

@@ -1,48 +1,34 @@
-"""Vector DB 연결 초기화 뼈대.
-
-실제 운영 환경에서는 Qdrant, Milvus, Pinecone 등의 클라이언트 SDK로 교체합니다.
-"""
-
-from typing import Any, Dict, List, Optional
-
+from functools import lru_cache
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_postgres import PGVector
 from app.core.config import settings
 
+# lru_cache: 커넥션 풀 재생성 방지 캐싱
+@lru_cache()
+def get_embedding_model() -> HuggingFaceEmbeddings:
+    """한국어 임베딩 모델을 CPU 환경에 싱글톤으로 로드합니다."""
+    return HuggingFaceEmbeddings(
+        model_name=settings.EMBEDDING_MODEL_NAME,
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},  # 코사인 유사도 검색 정확도 최적화
+    )
 
-class VectorClient:
-    """Vector DB와의 연결 및 유사도 검색을 담당하는 클라이언트 뼈대 클래스."""
+# RAG 시스템에서는 텍스트 청크 + 메타데이터 저장됨
+# 이후 검색 시 메타데이터 필터링을 걸 때 성능 향상을 위해 JSONB로 인덱싱
+@lru_cache()
+def get_vector_store() -> PGVector:
+    """PostgreSQL pgvector 벡터 저장소 싱글톤 인스턴스를 반환합니다."""
+    return PGVector(
+        embeddings=get_embedding_model(),
+        collection_name=settings.VECTOR_DB_COLLECTION,
+        connection=settings.SQLALCHEMY_DATABASE_URI,
+        use_jsonb=True,  # 판례 번호, 법령 조항 등 메타데이터를 JSONB로 인덱싱
+    )
 
-    def __init__(self, url: str = settings.VECTOR_DB_URL, api_key: str = settings.VECTOR_DB_API_KEY):
-        self.url = url
-        self.api_key = api_key
-        self._client: Optional[Any] = None
-
-    def connect(self) -> None:
-        """Vector DB 클라이언트를 초기화합니다.
-
-        TODO: 실제 Vector DB SDK(client)로 교체하여 연결을 수립합니다.
-        """
-        if self._client is not None:
-            return
-        # 예: self._client = QdrantClient(url=self.url, api_key=self.api_key)
-        self._client = {"connected": True, "url": self.url}
-
-    def close(self) -> None:
-        """Vector DB 연결을 종료합니다."""
-        self._client = None
-
-    async def similarity_search(
-        self,
-        query_vector: List[float],
-        collection: str,
-        top_k: int = 5,
-    ) -> List[Dict[str, Any]]:
-        """주어진 쿼리 벡터와 유사한 문서를 검색합니다.
-
-        TODO: 실제 Vector DB 검색 API 호출로 교체합니다.
-        """
-        if self._client is None:
-            self.connect()
-        return []
-
-
-vector_client = VectorClient()
+def get_retriever(k: int = 3):
+    """자연어 질문과 유사한 상위 k개의 법률 문서를 반환하는 검색기를 생성합니다."""
+    vector_store = get_vector_store()
+    return vector_store.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": k},
+    )

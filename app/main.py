@@ -15,9 +15,14 @@ if settings.BACKEND_CORS_ORIGINS:
         allow_headers=["*"],
     )
 
-app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix="/internal/ai")
 
-
+# 루트 엔드포인트
 @app.get("/", summary="루트 엔드포인트")
 async def root() -> dict:
     return {"message": f"{settings.PROJECT_NAME} is running."}
+
+# 인프라 헬스체크 연동 표준
+@app.get("/health", tags=["Health"], summary="헬스체크")
+async def health_check() -> dict:
+    return {"status": "ok", "environment": settings.ENVIRONMENT}

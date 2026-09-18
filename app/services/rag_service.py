@@ -1,48 +1,75 @@
-"""Vector DB 유사도 검색을 호출하는 RAG 서비스."""
+from typing import List
+from langchain_core.output_parsers import StrOutputParser
 
-from app.core.config import settings
-from app.db.vector_client import vector_client
-from app.schemas.rag_schema import RAGQueryRequest, RAGQueryResponse, RAGSearchResultItem
+from app.db.vector_client import get_retriever
+from app.services.llm_service import get_llm
+from app.prompts.consultation_prompt import get_consultation_prompt_template
+# consultation_schema에서 DTO 임포트
+from app.schemas.consultation_schema import (
+    ConsultationRequest,
+    ConsultationResponse,
+    LegalReference,
+    StructuredConsultationResult,
+)
 
 
-class RAGService:
-    """법령/판례 검색(RAG)을 담당하는 서비스 클래스."""
+def format_docs(docs) -> str:
+    formatted_chunks = []
+    for doc in docs:
+        law = doc.metadata.get("law", "법률")
+        article = doc.metadata.get("article", "")
+        header = f"[{law} {article}]" if article else f"[{law}]"
+        formatted_chunks.append(f"{header}\n{doc.page_content}")
+    return "\n\n".join(formatted_chunks)
 
-    async def search(self, request: RAGQueryRequest) -> RAGQueryResponse:
-        """질의에 대한 관련 법령/판례를 검색합니다.
 
-        TODO: 질의 임베딩 생성 후 vector_client.similarity_search 호출로 교체합니다.
-        """
-        collection = request.collection or settings.VECTOR_DB_COLLECTION
+def parse_legal_references(docs) -> List[LegalReference]:
+    references = []
+    for doc in docs:
+        law = str(doc.metadata.get("law", "관련 법령"))
+        article_val = doc.metadata.get("article")
+        article = str(article_val) if article_val is not None else None
 
-        # 예시: query_vector = await embed_text(request.query)
-        raw_results = await vector_client.similarity_search(
-            query_vector=[],
-            collection=collection,
-            top_k=request.top_k,
-        )
-
-        results = [
-            RAGSearchResultItem(
-                title=item.get("title", ""),
-                content=item.get("content", ""),
-                source=item.get("source"),
-                score=item.get("score", 0.0),
+        references.append(
+            LegalReference(
+                law=law,
+                article=article,
+                content=doc.page_content.strip(),
             )
-            for item in raw_results
-        ]
-
-        if not results:
-            results = [
-                RAGSearchResultItem(
-                    title="더미 검색 결과",
-                    content=f"'{request.query}'와 관련된 법령/판례 내용 (더미 구현)",
-                    source="예시 법령 제1조",
-                    score=0.0,
-                )
-            ]
-
-        return RAGQueryResponse(query=request.query, results=results)
+        )
+    return references
 
 
-rag_service = RAGService()
+async def generate_legal_consultation(request: ConsultationRequest) -> ConsultationResponse:
+    retriever = get_retriever(k=3)
+    docs = retriever.invoke(request.question)
+
+    context_str = format_docs(docs) if docs else "관련된 직접적인 법률 조항이 검색되지 않았습니다."
+
+    prompt = get_consultation_prompt_template()
+    llm = get_llm()
+    chain = prompt | llm | StrOutputParser()
+
+    raw_answer = await chain.ainvoke({
+        "context": context_str,
+        "question": request.question,
+    })
+
+    references = parse_legal_references(docs)
+
+    # INT-AI-001 명세에 맞춰 structured_result 객체로 패키징
+    structured_data = StructuredConsultationResult(
+        issues=["임금/수당 미지급", "근로시간 판단"] if "주휴" in request.question or "수당" in request.question else ["노동관계법 검토"],
+        references=references,
+        follow_up_questions=[
+            "주당 소정근로시간이 15시간 이상인가요?",
+            "약정된 소정근로일을 개근하셨나요?"
+        ] if "주휴" in request.question else [
+            "구체적인 근로계약서 작성 여부와 사업장 상시 근로자 수를 알려주실 수 있나요?"
+        ],
+    )
+
+    return ConsultationResponse(
+        answer=raw_answer.strip(),
+        structured_result=structured_data,
+    )

@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+from pydantic.alias_generators import to_camel
 
 
 class OCRDocumentType(str, Enum):
@@ -10,6 +10,12 @@ class OCRDocumentType(str, Enum):
     IMAGE = "IMAGE"
     PDF = "PDF"
 
+class EvidenceAnalysisResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    extracted_text: str
+    analysis_result: dict | None = None
+    success: bool = True
+    message: str = "증거 이미지 분석이 완료되었습니다."
 
 class OCRRequest(BaseModel):
     """Spring Boot로부터 전달받는 OCR 요청 스키마."""
@@ -19,7 +25,6 @@ class OCRRequest(BaseModel):
     document_type: OCRDocumentType = Field(
         default=OCRDocumentType.IMAGE, description="문서 종류 (IMAGE, PDF)"
     )
-
 
 class OCRResponse(BaseModel):
     """OCR 처리 결과 응답 스키마."""
