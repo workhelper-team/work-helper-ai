@@ -66,7 +66,7 @@ def fetch_all_precedents() -> List[Tuple]:
         case_name,
         court_name,
         judgment_date,
-        judgment_type
+        judgment_type,
         referenced_articles,
         matched_laws,
         case_note,

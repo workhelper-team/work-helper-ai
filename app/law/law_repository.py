@@ -44,7 +44,7 @@ def upsert_legal_document(doc_data: Dict[str, Any]) -> int:
 ## 법령 원문 데이터 전체 조회
 def fetch_all_legal_documents() -> List[Tuple[int, str, str, Dict[str, Any]]]:
     select_sql = (
-        "SELECT legal_documents_id, title, full_text, metadata FROM rag.legal_documents;"
+        "SELECT legal_document_id, title, full_text, metadata FROM rag.legal_documents;"
     )
     
     with get_db_connection() as conn:

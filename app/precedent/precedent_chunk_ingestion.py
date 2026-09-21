@@ -16,7 +16,7 @@ def build_precedent_full_text(
         parts.append(f"[판시사항]\n{case_note.strip()}")
         
     if summary and summary.strip():
-        parts.append(f"[판결요지]\{summary.strip()}")
+        parts.append(f"[판결요지]\n{summary.strip()}")
         
     if judgment_content and judgment_content.strip():
         parts.append(f"[판결전문]\n{judgment_content.strip()}")
