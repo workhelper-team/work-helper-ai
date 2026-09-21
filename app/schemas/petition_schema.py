@@ -1,6 +1,6 @@
 from datetime import date
 from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -24,6 +24,11 @@ class ContractType(str, Enum):
     WRITTEN = "WRITTEN"  # 서면
     VERBAL = "VERBAL"    # 구두
 
+def empty_str_to_none(v):
+    """빈 문자열("")이나 공백이 들어오면 None으로 변환하여 Pydantic 날짜 검증 에러 방지"""
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
 
 # ---------------------------------------------------------------------------
 # 1. 도메인 공통 엔티티 (진정인, 피진정인, 근로사실관계)
@@ -39,6 +44,11 @@ class ComplainantData(BaseModel):
     mobile_phone: str | None = Field(default=None, description="휴대전화번호")
     email: str | None = Field(default=None, description="전자우편주소")
     receive_status: bool = Field(default=True, description="처리상황 수신여부")
+    
+    @field_validator("birth_date", mode="before")
+    @classmethod
+    def validate_birth_date(cls, v):
+        return empty_str_to_none(v)
 
 
 class RespondentData(BaseModel):
@@ -68,6 +78,11 @@ class EmploymentFacts(BaseModel):
     unpaid_wages: int = Field(default=0, description="체불 기본임금 (원)")
     unpaid_severance_pay: int = Field(default=0, description="체불 퇴직금 (원)")
     unpaid_other_amount: int = Field(default=0, description="기타 체불금 (주휴, 연차, 가산수당 등) (원)")
+    
+    @field_validator("hire_date", "resignation_date", mode="before")
+    @classmethod
+    def validate_dates(cls, v):
+        return empty_str_to_none(v)
 
 
 # ---------------------------------------------------------------------------
