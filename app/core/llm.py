@@ -12,11 +12,24 @@ def get_llm(temperature: float | None = None) -> BaseChatModel:
     if getattr(settings, "USE_LOCAL_LLM", True):
         from langchain_ollama import ChatOllama
 
-        return ChatOllama(
-            base_url=settings.OLLAMA_BASE_URL,
-            model=settings.OLLAMA_MODEL_NAME,
-            temperature=temp,
-        )
+        ollama_model = getattr(settings, "OLLAMA_MODEL", getattr(settings, "OLLAMA_MODEL_NAME", "llama3.1"))
+        ollama_base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
+
+        common_kwargs = {
+            "base_url": ollama_base_url,
+            "model": ollama_model,
+            "temperature": temp,
+            "model_kwargs": {"think": False},
+        }
+
+        try:
+            return ChatOllama(reasoning=False, **common_kwargs)
+        except TypeError:
+            try:
+                return ChatOllama(**common_kwargs)
+            except TypeError:
+                common_kwargs["model_kwargs"] = {"think": False, "options": {"think": False}}
+                return ChatOllama(**common_kwargs)
     else:
         from langchain_openai import ChatOpenAI
 

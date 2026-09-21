@@ -31,9 +31,9 @@ class Settings(BaseSettings):
         return value
 
     # --- LLM Providers ---
-    USE_LOCAL_LLM: bool = False
+    USE_LOCAL_LLM: bool = True
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL_NAME: str = "gemma2:2b"
+    OLLAMA_MODEL_NAME: str = "gemma2:2b" # 모델 체급이 매우 낮습니다, 테스트 및 서비스 시 변경 예정
 
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL_NAME: str = "gpt-4o-mini"

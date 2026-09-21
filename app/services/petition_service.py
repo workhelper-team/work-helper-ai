@@ -1,6 +1,5 @@
 import re
 from datetime import date
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from app.core.llm import get_llm
@@ -15,16 +14,43 @@ from app.prompts.petition_prompt import get_petition_prompt
 
 
 class PetitionProcessingService:
-    # 정규식 패턴 모음
     DATE_PATTERNS = [
-        r"(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})일?",
+        r"(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?",
     ]
-    PAY_DAY_PATTERN = r"(?:매월|매달|매주)\s*(\d{1,2}일?|말일|특정요일)"
-    REPRESENTATIVE_PATTERN = r"(?:대표자?|대표이사|사용자|사업주)\s*[:：\-]?\s*([가-힣]{2,4})"
-    COMPANY_NAME_PATTERN = r"(?:상\s*호|회사명|사업장명)\s*[:：\-]?\s*([가-힣A-Za-z0-9\(\)\（\）\s]{2,20})"
+    PAY_DAY_PATTERN = r"(?:지급일\s*[:：]?\s*)?(?:매\s*월|매\s*달|매\s*주)\s*(\d{1,2}\s*일?|말일)"
+
+    # 회사명: 라벨 뒤에 실제 회사명이 오고, 이어서 대표자/주소/전화 등 항목이 나오는 경우까지만 잡는다.
+    COMPANY_NAME_PATTERN = (
+        r"(?:상\s*호|회사명|사업장명|\(갑\))\s*[:：\-]?\s*"
+        r"(?P<company>[가-힣A-Za-z0-9][가-힣A-Za-z0-9()（）\s]{1,30}?)(?=\s*(?:\(?\s*(?:대표자|대표이사|주소|사업장|사무실|전화|휴대폰|이메일|사업자|등록|근무|직무|고용형태|계약)|$))"
+    )
+
+    # 대표자명: '대표이사: 김철수' 또는 '대표자 김철수'에서 실제 이름만 추출
+    REPRESENTATIVE_PATTERN = (
+        r"(?:대표자|대표이사|사용자|사업주)\s*[:：\-]?\s*(?:\()?"
+        r"(?P<name>[가-힣A-Za-z]{2,8})(?=\s*(?:\)|\]|\}|,|;|\n|$|(?:주소|사업장|사무실|전화|휴대폰|이메일|등록|고용형태|계약|근무|직무)))"
+    )
+
+    # 진정인(근로자)명: 라벨이 붙은 실제 이름만 잡고, '간에'처럼 일반 문맥 단어는 제외
+    WORKER_NAME_PATTERN = (
+        r"(?:\[\s*근로자\s*\]|\(을\)|근로자|피진정인|성\s*명)\s*(?:\([가-힣]+\))?\s*(?:[:：\-]|\)|\])?\s*"
+        r"(?P<name>[가-힣]{2,5})(?=\s*(?:\)|\]|\}|,|;|\n|$|\(인\)|\(명\)|\s*\([가-힣]+\)))"
+    )
 
     def __init__(self):
         self.prompt = get_petition_prompt()
+
+    def _is_empty(self, value: str | None) -> bool:
+        """값이 None이거나 공백, 또는 Swagger 더미값('string')인 경우 비어있다고 판별"""
+        if value is None:
+            return True
+        val_str = str(value).strip()
+        return val_str == "" or val_str.lower() == "string"
+
+    def _clean_ocr_text(self, text: str) -> str:
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
 
     def _parse_date(self, text: str) -> date | None:
         for pattern in self.DATE_PATTERNS:
@@ -37,55 +63,90 @@ class PetitionProcessingService:
                     continue
         return None
 
+    def _sanitize_extracted_value(self, value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", value).strip()
+        cleaned = cleaned.strip(" \t\n\r()[]{}（）")
+        cleaned = re.sub(r"^(?:대표자|대표이사|사용자|사업주|근로자|피진정인|성명|회사명|상호|사업장명|갑|을)\s*[:：\-]?$", "", cleaned)
+        return cleaned.strip()
+
     def _extract_pay_day(self, text: str) -> str | None:
         match = re.search(self.PAY_DAY_PATTERN, text)
-        return match.group(0).strip() if match else None
+        if match:
+            return match.group(0).strip()
+        return None
 
     def _extract_representative_name(self, text: str) -> str | None:
         match = re.search(self.REPRESENTATIVE_PATTERN, text)
-        return match.group(1).strip() if match else None
+        if match:
+            rep = self._sanitize_extracted_value(match.group("name"))
+            if rep in ["대표", "이사", "사장", "사용", "성명", "사업주"]:
+                return None
+            return rep or None
+        return None
+
+    def _extract_worker_name(self, text: str) -> str | None:
+        match = re.search(self.WORKER_NAME_PATTERN, text)
+        if match:
+            name = self._sanitize_extracted_value(match.group("name"))
+            if name and len(name) >= 2:
+                return name
+        return None
 
     def _extract_company_name(self, text: str) -> str | None:
         match = re.search(self.COMPANY_NAME_PATTERN, text)
-        return match.group(1).strip() if match else None
+        if match:
+            name = self._sanitize_extracted_value(match.group("company"))
+            if name and len(name) >= 2:
+                return name
+        return None
 
     def enrich_petition_data(
         self, request: PetitionDraftRequest
-    ) -> tuple[RespondentData, EmploymentFacts, dict]:
-        combined_ocr_text = "\n".join(request.evidence_texts)
+    ) -> tuple[dict, RespondentData, EmploymentFacts, dict]:
+        raw_combined = "\n".join(request.evidence_texts)
+        combined_ocr_text = self._clean_ocr_text(raw_combined)
         inferred_facts: dict[str, str] = {}
+
+        # 0. 진정인(근로자) 정보 보완
+        comp_dict = request.complainant.model_dump()
+        if self._is_empty(comp_dict.get("name")):
+            worker_name = self._extract_worker_name(combined_ocr_text)
+            if worker_name:
+                comp_dict["name"] = worker_name
+                inferred_facts["complainant.name"] = f"OCR 추출: {worker_name}"
 
         # 1. 사업장 정보 보완
         resp_dict = request.respondent.model_dump()
-        if not resp_dict.get("name"):
+        if self._is_empty(resp_dict.get("name")):
             name = self._extract_representative_name(combined_ocr_text)
             if name:
                 resp_dict["name"] = name
                 inferred_facts["respondent.name"] = f"OCR 추출: {name}"
 
-        if not resp_dict.get("company_name"):
+        if self._is_empty(resp_dict.get("company_name")):
             comp = self._extract_company_name(combined_ocr_text)
             if comp:
                 resp_dict["company_name"] = comp
                 inferred_facts["respondent.company_name"] = f"OCR 추출: {comp}"
 
-        # 2. 사실관계 보완
+        # 2. 근로 조건 사실관계 보완
         facts_dict = request.facts.model_dump()
-        if not facts_dict.get("pay_day"):
+        if self._is_empty(facts_dict.get("pay_day")):
             pay_day = self._extract_pay_day(combined_ocr_text)
             if pay_day:
                 facts_dict["pay_day"] = pay_day
                 inferred_facts["facts.pay_day"] = f"OCR 추출: {pay_day}"
 
-        if not facts_dict.get("hire_date"):
+        # hire_date가 없거나 오늘 기본 날짜인 경우 추출 시도
+        if not facts_dict.get("hire_date") or self._is_empty(str(facts_dict.get("hire_date"))):
             h_date = self._parse_date(combined_ocr_text)
             if h_date:
                 facts_dict["hire_date"] = h_date
                 inferred_facts["facts.hire_date"] = f"OCR 추출: {h_date}"
 
-        return RespondentData(**resp_dict), EmploymentFacts(**facts_dict), inferred_facts
+        return comp_dict, RespondentData(**resp_dict), EmploymentFacts(**facts_dict), inferred_facts
 
-    async def _generate_claim_reason_llm(
+    def _build_fallback_claim_reason(
         self,
         complainant_name: str,
         resp: RespondentData,
@@ -94,39 +155,94 @@ class PetitionProcessingService:
         evidence_texts: list[str],
         total_amount: int,
     ) -> str:
-        """LLM을 호출하여 격식 있는 행정 서식 진정 사유 전문 생성"""
-        # 파트너 작업자 RAG 결합 전 임시 더미 법률 컨텍스트
-        dummy_legal_context = (
-            "- 근로기준법 제36조(금품 청산): 사망 또는 퇴직 시 지급 사유 발생일로부터 14일 이내 금품 지급 의무\n"
-            "- 근로기준법 제43조(임금 지급): 매월 1회 이상 일정한 날짜를 정하여 전액 통화 지급 원칙"
+        complainant = complainant_name.strip() if not self._is_empty(complainant_name) else "[확인 필요: 진정인 성명]"
+        company_name = resp.company_name if not self._is_empty(resp.company_name) else "[확인 필요: 회사명]"
+        representative_name = resp.name if not self._is_empty(resp.name) else "[확인 필요: 대표자명]"
+        company_address = resp.address if not self._is_empty(resp.address) else "[확인 필요: 사업장 주소]"
+        hire_date = str(facts.hire_date) if facts.hire_date else "[확인 필요: 입사일]"
+        resignation_date = str(facts.resignation_date) if facts.resignation_date else "[확인 필요: 퇴사일]"
+        pay_day = facts.pay_day if not self._is_empty(facts.pay_day) else "[확인 필요: 급여일]"
+        evidence_summary = (
+            "\n".join(evidence_texts) if evidence_texts else "제출된 증거 서류가 확인되지 않았습니다."
+        )
+        user_summary = user_statement.strip() if not self._is_empty(user_statement) else "임금 체불로 인한 진정 제기"
+
+        return (
+            f"진정인 {complainant}은 피진정인 {company_name}(대표자 {representative_name}, 주소: {company_address}) 소속으로 "
+            f"{hire_date}부터 {resignation_date}까지 근무하였고, 정기 급여일은 {pay_day}이며, "
+            f"체불 금액은 총 {total_amount:,}원으로 확인된다. 진정인은 {user_summary}라고 주장하며, "
+            f"제출된 증빙자료({evidence_summary[:200]}...)를 근거로 하여 피진정인의 임금 및 퇴직금 지급 의무 이행을 요구한다."
         )
 
-        llm = get_llm(temperature=0.2)
-        chain = self.prompt | llm | StrOutputParser()
+    async def _generate_claim_reason_llm(
+        self,
+        complainant_name: str,
+        resp: RespondentData,
+        facts: EmploymentFacts,
+        user_statement: str,
+        total_amount: int,
+    ) -> str:
+        dummy_legal_context = (
+            "- 근로기준법 제36조(금품 청산): 사망 또는 퇴직 시 14일 이내 일체의 금품 지급 의무\n"
+            "- 근로기준법 제43조(임금 지급): 매월 1회 이상 통화로 전액 지급"
+        )
 
-        response = await chain.ainvoke({
-            "complainant_name": complainant_name,
-            "company_name": resp.company_name,
-            "representative_name": resp.name or "성명 미상",
-            "hire_date": str(facts.hire_date) if facts.hire_date else "미상",
-            "resignation_date": str(facts.resignation_date) if facts.resignation_date else "재직 중",
-            "employment_status": facts.employment_status.value,
-            "job_description": facts.job_description or "일반 업무",
-            "pay_day": facts.pay_day or "약정일",
-            "unpaid_wages": f"{facts.unpaid_wages:,}",
-            "unpaid_severance_pay": f"{facts.unpaid_severance_pay:,}",
-            "unpaid_other_amount": f"{facts.unpaid_other_amount:,}",
-            "total_amount": f"{total_amount:,}",
-            "user_statement": user_statement,
-            "evidence_texts": "\n".join(evidence_texts) if evidence_texts else "제출된 추가 증거 서류 전문 없음",
-            "legal_context": dummy_legal_context,
-        })
-        return response.strip()
+        try:
+            llm = get_llm()
+            chain = self.prompt | llm | StrOutputParser()
+
+            input_payload = {
+                "complainant_name": complainant_name if not self._is_empty(complainant_name) else "[확인 필요: 진정인 성명]",
+                "company_name": resp.company_name if not self._is_empty(resp.company_name) else "[확인 필요: 회사명]",
+                "representative_name": resp.name if not self._is_empty(resp.name) else "[확인 필요: 대표자명]",
+                "company_address": resp.address if not self._is_empty(resp.address) else "[확인 필요: 사업장 주소]",
+                "hire_date": str(facts.hire_date) if facts.hire_date else "[확인 필요: 입사일]",
+                "resignation_date": str(facts.resignation_date) if facts.resignation_date else "[확인 필요: 퇴사일]",
+                "employment_status": facts.employment_status.value,
+                "job_description": facts.job_description if not self._is_empty(facts.job_description) else "일반 업무",
+                "pay_day": facts.pay_day if not self._is_empty(facts.pay_day) else "[확인 필요: 급여일]",
+                "unpaid_wages": f"{facts.unpaid_wages:,}",
+                "unpaid_severance_pay": f"{facts.unpaid_severance_pay:,}",
+                "unpaid_other_amount": f"{facts.unpaid_other_amount:,}",
+                "total_amount": f"{total_amount:,}",
+                "user_statement": user_statement if not self._is_empty(user_statement) else "임금 체불로 인한 진정 제기",
+                "legal_context": dummy_legal_context,
+            }
+
+            print(f"[DEBUG LLM INPUT] >>> {input_payload}")
+            raw_response = await chain.ainvoke(input_payload)
+            response_text = str(raw_response).strip() if raw_response is not None else ""
+            print(f"[DEBUG LLM OUTPUT] >>> raw: {repr(raw_response)}")
+
+            if not response_text:
+                print("[DEBUG LLM FALLBACK] >>> 빈 응답 감지, 안전한 대체 문안을 사용합니다.")
+                return self._build_fallback_claim_reason(
+                    complainant_name,
+                    resp,
+                    facts,
+                    user_statement,
+                    [],
+                    total_amount,
+                )
+
+            return response_text
+        except Exception as e:
+            print(f"[DEBUG LLM ERROR] >>> {e}")
+            import traceback
+            traceback.print_exc()
+            return self._build_fallback_claim_reason(
+                complainant_name,
+                resp,
+                facts,
+                user_statement,
+                [],
+                total_amount,
+            )
 
     async def generate_draft(
         self, request: PetitionDraftRequest
     ) -> PetitionDraftResponse:
-        enriched_resp, enriched_facts, inferred_facts = self.enrich_petition_data(request)
+        enriched_comp_dict, enriched_resp, enriched_facts, inferred_facts = self.enrich_petition_data(request)
 
         total_amount = (
             enriched_facts.unpaid_wages
@@ -134,30 +250,27 @@ class PetitionProcessingService:
             + enriched_facts.unpaid_other_amount
         )
 
-        # 실제 LLM 호출로 진정 사유 작성
         claim_reason = await self._generate_claim_reason_llm(
-            complainant_name=request.complainant.name,
+            complainant_name=enriched_comp_dict.get("name", ""),
             resp=enriched_resp,
             facts=enriched_facts,
             user_statement=request.user_statement,
-            evidence_texts=request.evidence_texts,
             total_amount=total_amount,
         )
 
-        generated_content = GeneratedPetitionContent(
-            claim_reason=claim_reason,
-            target_labor_office=None,
-            total_unpaid_amount=total_amount,
-            inferred_facts=inferred_facts if inferred_facts else None,
-        )
-
+        from app.schemas.petition_schema import ComplainantData
         return PetitionDraftResponse(
             success=True,
             case_id=request.case_id,
-            complainant=request.complainant,
+            complainant=ComplainantData(**enriched_comp_dict),
             respondent=enriched_resp,
             facts=enriched_facts,
-            content=generated_content,
+            content=GeneratedPetitionContent(
+                claim_reason=claim_reason,
+                target_labor_office=None,
+                total_unpaid_amount=total_amount,
+                inferred_facts=inferred_facts if inferred_facts else None,
+            ),
         )
 
 
