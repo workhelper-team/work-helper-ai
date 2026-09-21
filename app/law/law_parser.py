@@ -2,7 +2,7 @@ import json
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List
 
-# 가져온 법령 정보의 조문내용과 항/호 단위 텍스트를 추출하여 테이블 스키마에 맞춰 변형하는 함수
+## 가져온 법령 정보의 조문내용과 항/호 단위 텍스트를 추출하여 테이블 스키마에 맞춰 변형하는 함수
 def parse_to_documents_schema(law_id: str, xml_content: bytes) -> Dict[str, Any]:
     
     # XML 원문을 legal_documents 테이블 스키마 포맷으로 추출

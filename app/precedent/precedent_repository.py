@@ -1,18 +1,6 @@
-import os
-import psycopg
-from dotenv import load_dotenv
-
-load_dotenv()
-
-## env 파일에서 설정을 로드하여 DB 커넥션을 반환
-def get_db_connection():
-    return psycopg.connect(
-        host=os.getenv("POSTGRES_HOST"),
-        port=os.getenv("POSTGRES_PORT", "5432"),
-        dbname=os.getenv("POSTGRES_DB", "workhelper"),
-        user=os.getenv("POSTGRES_USER", "postgres"),
-        password=os.getenv("POSTGRES_PASSWORD")
-    )
+from typing import Any, Dict, List, Tuple
+from psycopg.types.json import Json
+from app.db.connection import get_db_connection
     
 ## 판례 데이터 배치 저장
 def upsert_precedents(data_list: list[dict]) -> None:
@@ -68,3 +56,47 @@ def upsert_precedents(data_list: list[dict]) -> None:
     except Exception as e:
         print(f"[DB] 데이터 적재 중 에러 발생 : {e}")
         raise e
+    
+## 판례 원문 데이터 전체 조회
+def fetch_all_precedents() -> List[Tuple]:
+    select_sql = """
+    SELECT
+        precedent_id,
+        case_number,
+        case_name,
+        court_name,
+        judgment_date,
+        judgment_type,
+        referenced_articles,
+        matched_laws,
+        case_note,
+        summary,
+        judgment_content
+    FROM rag.precedents;
+    """
+    
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(select_sql)
+            return cursor.fetchall()
+        
+## 판례 청크 데이터를 rag.legal_chunks 테이블에 저장 (UPSERT)
+def upsert_precedent_chunks(records: List[Tuple[int, int, str, str, Json]]) -> None:
+    if not records:
+        return
+    
+    upsert_sql = """
+    INSERT INTO rag.precedent_chunks (precedent_id, chunk_index, content, embedding, metadata)
+    VALUES (%s, %s, %s, %s, %s)
+    ON CONFLICT (precedent_id, chunk_index)
+    DO UPDATE SET
+        content = EXCLUDED.content,
+        embedding = EXCLUDED.embedding,
+        metadata = EXCLUDED.metadata;
+    """
+    
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.executemany(upsert_sql, records)
+            conn.commit()
+    

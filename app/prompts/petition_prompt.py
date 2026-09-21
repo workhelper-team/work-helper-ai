@@ -19,9 +19,15 @@ PETITION_SYSTEM_PROMPT = """\
 PETITION_USER_TEMPLATE = """\
 다음 제공된 사실관계만을 엄격히 사용하여 고용노동부에 제출할 진정 사유 본문을 작성하십시오.
 
+[작성 원칙]
+- 제공된 사실관계 외에는 임의로 가정하거나 새 사실을 추가하지 마십시오.
+- 사실관계가 누락되었거나 불명확한 경우에는 절대로 가상의 날짜, 금액, 인물, 회사 정보를 지어내지 않고 `[확인 필요: 항목명]` 형태로 남겨두십시오.
+- 진정인(근로자)의 입장에서 피진정인(사업주/회사)의 법 위반 사실을 고발하는 어조로 서술하십시오.
+
 ### 1. 사건 기본 사실관계
 - 진정인(근로자): {complainant_name}
 - 피진정인(회사명): {company_name} (대표자: {representative_name})
+- 사업장 주소: {company_address}
 - 근무 기간: {hire_date} ~ {resignation_date} ({employment_status})
 - 담당 업무: {job_description}
 - 정기 급여일: {pay_day}
@@ -30,10 +36,7 @@ PETITION_USER_TEMPLATE = """\
 ### 2. 진정인 진술 피해 경위
 {user_statement}
 
-### 3. 증빙 서류 발췌 텍스트
-{evidence_texts}
-
-### 4. 법률 근거
+### 3. 법률 근거
 {legal_context}
 
 위 사실에 입각한 진정 사유 본문:"""
