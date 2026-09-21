@@ -18,9 +18,24 @@ class PetitionProcessingService:
         r"(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?",
     ]
     PAY_DAY_PATTERN = r"(?:지급일\s*[:：]?\s*)?(?:매\s*월|매\s*달|매\s*주)\s*(\d{1,2}\s*일?|말일)"
-    REPRESENTATIVE_PATTERN = r"(?:대표자?|대표이사|사용자|사업주)\s*[:：\-]?\s*\(?([가-힣]{2,4})\)?"
-    COMPANY_NAME_PATTERN = r"(?:상\s*호|회사명|사업장명|\(갑\))\s*[:：\-]?\s*([가-힣A-Za-z0-9\(\)\（\）\s]{2,20})"
-    WORKER_NAME_PATTERN = r"(?:근로자|피진정인|성\s*명|\(을\))\s*(?:\([가-힣]+\))?\s*[:：\-]?\s*([가-힣]{2,4})"
+
+    # 회사명: 라벨 뒤에 실제 회사명이 오고, 이어서 대표자/주소/전화 등 항목이 나오는 경우까지만 잡는다.
+    COMPANY_NAME_PATTERN = (
+        r"(?:상\s*호|회사명|사업장명|\(갑\))\s*[:：\-]?\s*"
+        r"(?P<company>[가-힣A-Za-z0-9][가-힣A-Za-z0-9()（）\s]{1,30}?)(?=\s*(?:\(?\s*(?:대표자|대표이사|주소|사업장|사무실|전화|휴대폰|이메일|사업자|등록|근무|직무|고용형태|계약)|$))"
+    )
+
+    # 대표자명: '대표이사: 김철수' 또는 '대표자 김철수'에서 실제 이름만 추출
+    REPRESENTATIVE_PATTERN = (
+        r"(?:대표자|대표이사|사용자|사업주)\s*[:：\-]?\s*(?:\()?"
+        r"(?P<name>[가-힣A-Za-z]{2,8})(?=\s*(?:\)|\]|\}|,|;|\n|$|(?:주소|사업장|사무실|전화|휴대폰|이메일|등록|고용형태|계약|근무|직무)))"
+    )
+
+    # 진정인(근로자)명: 라벨이 붙은 실제 이름만 잡고, '간에'처럼 일반 문맥 단어는 제외
+    WORKER_NAME_PATTERN = (
+        r"(?:\[\s*근로자\s*\]|\(을\)|근로자|피진정인|성\s*명)\s*(?:\([가-힣]+\))?\s*(?:[:：\-]|\)|\])?\s*"
+        r"(?P<name>[가-힣]{2,5})(?=\s*(?:\)|\]|\}|,|;|\n|$|\(인\)|\(명\)|\s*\([가-힣]+\)))"
+    )
 
     def __init__(self):
         self.prompt = get_petition_prompt()
@@ -48,6 +63,12 @@ class PetitionProcessingService:
                     continue
         return None
 
+    def _sanitize_extracted_value(self, value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", value).strip()
+        cleaned = cleaned.strip(" \t\n\r()[]{}（）")
+        cleaned = re.sub(r"^(?:대표자|대표이사|사용자|사업주|근로자|피진정인|성명|회사명|상호|사업장명|갑|을)\s*[:：\-]?$", "", cleaned)
+        return cleaned.strip()
+
     def _extract_pay_day(self, text: str) -> str | None:
         match = re.search(self.PAY_DAY_PATTERN, text)
         if match:
@@ -57,19 +78,26 @@ class PetitionProcessingService:
     def _extract_representative_name(self, text: str) -> str | None:
         match = re.search(self.REPRESENTATIVE_PATTERN, text)
         if match:
-            return match.group(1).strip()
+            rep = self._sanitize_extracted_value(match.group("name"))
+            if rep in ["대표", "이사", "사장", "사용", "성명", "사업주"]:
+                return None
+            return rep or None
         return None
 
     def _extract_worker_name(self, text: str) -> str | None:
         match = re.search(self.WORKER_NAME_PATTERN, text)
         if match:
-            return match.group(1).strip()
+            name = self._sanitize_extracted_value(match.group("name"))
+            if name and len(name) >= 2:
+                return name
         return None
 
     def _extract_company_name(self, text: str) -> str | None:
         match = re.search(self.COMPANY_NAME_PATTERN, text)
         if match:
-            return match.group(1).strip()
+            name = self._sanitize_extracted_value(match.group("company"))
+            if name and len(name) >= 2:
+                return name
         return None
 
     def enrich_petition_data(
@@ -118,13 +146,40 @@ class PetitionProcessingService:
 
         return comp_dict, RespondentData(**resp_dict), EmploymentFacts(**facts_dict), inferred_facts
 
-    async def _generate_claim_reason_llm(
+    def _build_fallback_claim_reason(
         self,
         complainant_name: str,
         resp: RespondentData,
         facts: EmploymentFacts,
         user_statement: str,
         evidence_texts: list[str],
+        total_amount: int,
+    ) -> str:
+        complainant = complainant_name.strip() if not self._is_empty(complainant_name) else "[확인 필요: 진정인 성명]"
+        company_name = resp.company_name if not self._is_empty(resp.company_name) else "[확인 필요: 회사명]"
+        representative_name = resp.name if not self._is_empty(resp.name) else "[확인 필요: 대표자명]"
+        company_address = resp.address if not self._is_empty(resp.address) else "[확인 필요: 사업장 주소]"
+        hire_date = str(facts.hire_date) if facts.hire_date else "[확인 필요: 입사일]"
+        resignation_date = str(facts.resignation_date) if facts.resignation_date else "[확인 필요: 퇴사일]"
+        pay_day = facts.pay_day if not self._is_empty(facts.pay_day) else "[확인 필요: 급여일]"
+        evidence_summary = (
+            "\n".join(evidence_texts) if evidence_texts else "제출된 증거 서류가 확인되지 않았습니다."
+        )
+        user_summary = user_statement.strip() if not self._is_empty(user_statement) else "임금 체불로 인한 진정 제기"
+
+        return (
+            f"진정인 {complainant}은 피진정인 {company_name}(대표자 {representative_name}, 주소: {company_address}) 소속으로 "
+            f"{hire_date}부터 {resignation_date}까지 근무하였고, 정기 급여일은 {pay_day}이며, "
+            f"체불 금액은 총 {total_amount:,}원으로 확인된다. 진정인은 {user_summary}라고 주장하며, "
+            f"제출된 증빙자료({evidence_summary[:200]}...)를 근거로 하여 피진정인의 임금 및 퇴직금 지급 의무 이행을 요구한다."
+        )
+
+    async def _generate_claim_reason_llm(
+        self,
+        complainant_name: str,
+        resp: RespondentData,
+        facts: EmploymentFacts,
+        user_statement: str,
         total_amount: int,
     ) -> str:
         dummy_legal_context = (
@@ -136,10 +191,11 @@ class PetitionProcessingService:
             llm = get_llm()
             chain = self.prompt | llm | StrOutputParser()
 
-            response = await chain.ainvoke({
+            input_payload = {
                 "complainant_name": complainant_name if not self._is_empty(complainant_name) else "[확인 필요: 진정인 성명]",
                 "company_name": resp.company_name if not self._is_empty(resp.company_name) else "[확인 필요: 회사명]",
                 "representative_name": resp.name if not self._is_empty(resp.name) else "[확인 필요: 대표자명]",
+                "company_address": resp.address if not self._is_empty(resp.address) else "[확인 필요: 사업장 주소]",
                 "hire_date": str(facts.hire_date) if facts.hire_date else "[확인 필요: 입사일]",
                 "resignation_date": str(facts.resignation_date) if facts.resignation_date else "[확인 필요: 퇴사일]",
                 "employment_status": facts.employment_status.value,
@@ -150,12 +206,38 @@ class PetitionProcessingService:
                 "unpaid_other_amount": f"{facts.unpaid_other_amount:,}",
                 "total_amount": f"{total_amount:,}",
                 "user_statement": user_statement if not self._is_empty(user_statement) else "임금 체불로 인한 진정 제기",
-                "evidence_texts": "\n".join(evidence_texts) if evidence_texts else "(제출된 증거 서류 없음)",
                 "legal_context": dummy_legal_context,
-            })
-            return response.strip()
+            }
+
+            print(f"[DEBUG LLM INPUT] >>> {input_payload}")
+            raw_response = await chain.ainvoke(input_payload)
+            response_text = str(raw_response).strip() if raw_response is not None else ""
+            print(f"[DEBUG LLM OUTPUT] >>> raw: {repr(raw_response)}")
+
+            if not response_text:
+                print("[DEBUG LLM FALLBACK] >>> 빈 응답 감지, 안전한 대체 문안을 사용합니다.")
+                return self._build_fallback_claim_reason(
+                    complainant_name,
+                    resp,
+                    facts,
+                    user_statement,
+                    [],
+                    total_amount,
+                )
+
+            return response_text
         except Exception as e:
-            return f"[생성 실패] LLM 호출 중 오류가 발생했습니다: {str(e)}"
+            print(f"[DEBUG LLM ERROR] >>> {e}")
+            import traceback
+            traceback.print_exc()
+            return self._build_fallback_claim_reason(
+                complainant_name,
+                resp,
+                facts,
+                user_statement,
+                [],
+                total_amount,
+            )
 
     async def generate_draft(
         self, request: PetitionDraftRequest
@@ -173,7 +255,6 @@ class PetitionProcessingService:
             resp=enriched_resp,
             facts=enriched_facts,
             user_statement=request.user_statement,
-            evidence_texts=request.evidence_texts,
             total_amount=total_amount,
         )
 
