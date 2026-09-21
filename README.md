@@ -1,6 +1,14 @@
 # WorkHelper AI Server
 
-법률/행정 지원 플랫폼 **WorkHelper**의 AI 전담 서버입니다. Spring Boot 메인 백엔드로부터 요청을 받아 OCR(문서 인식), Vector DB 기반 RAG(법령/판례 검색), LLM을 활용한 진정서 자동 작성 워크플로우를 수행합니다.
+법률/행정 지원 플랫폼 **WorkHelper**의 AI 전담 서버입니다. Spring Boot 메인 백엔드로부터 요청을 받아 OCR(문서 인식), 진정서 작성, 법령·판례 데이터 파싱 및 임베딩, Vector DB 기반 RAG 검색 워크플로우를 수행합니다.
+
+## 현재 구현 범위
+
+- OCR 기반 문서 인식
+- LLM 기반 진정서 작성 및 상담 워크플로우
+- 법령·판례 API 데이터 수집, 파싱 및 저장
+- 문서 청크 생성 및 임베딩
+- Vector DB 기반 법령·판례 검색(RAG)
 
 ## 기술 스택
 
@@ -13,30 +21,49 @@
 
 ```
 app/
-├── api/
+├── api/                         # FastAPI 라우터
 │   └── v1/
 │       ├── api.py
 │       └── endpoints/
 │           ├── health.py
 │           ├── ocr.py
-│           ├── rag.py
-│           └── petition.py
-├── core/
-│   └── config.py
-├── db/
+│           ├── consultation.py
+│           ├── petition.py
+│           └── rag.py
+├── core/                        # 환경설정 및 LLM 설정
+│   ├── config.py
+│   └── llm.py
+├── db/                          # DB 연결, 임베딩, Vector DB 클라이언트
+│   ├── connection.py
+│   ├── embeddings.py
 │   └── vector_client.py
-├── prompts/
+├── law/                         # 법령 데이터 수집·파싱·저장·임베딩
+│   ├── law_api_client.py
+│   ├── law_parser.py
+│   ├── law_repository.py
+│   ├── law_ingestion.py
+│   └── law_chunk_ingestion.py
+├── precedent/                   # 판례 데이터 수집·파싱·저장·임베딩
+│   ├── precedent_api_client.py
+│   ├── precedent_parser.py
+│   ├── precedent_repository.py
+│   ├── precedent_ingestion.py
+│   └── precedent_chunk_ingestion.py
+├── prompts/                     # LLM 프롬프트
+│   ├── consultation_prompt.py
 │   └── petition_prompt.py
-├── schemas/
+├── schemas/                     # API 요청·응답 스키마
+│   ├── consultation_schema.py
 │   ├── ocr_schema.py
-│   ├── rag_schema.py
-│   └── petition_schema.py
-├── services/
-│   ├── ocr_service.py
-│   ├── rag_service.py
+│   ├── petition_schema.py
+│   └── rag_schema.py
+├── services/                    # 도메인 서비스 및 워크플로우
 │   ├── llm_service.py
+│   ├── ocr_service.py
+│   ├── petition_service.py
+│   ├── rag_service.py
 │   └── workflow_service.py
-└── main.py
+└── main.py                      # 애플리케이션 진입점
 ```
 
 ## 개발 환경 설정
