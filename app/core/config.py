@@ -31,12 +31,14 @@ class Settings(BaseSettings):
         return value
 
     # --- LLM Providers ---
-    USE_LOCAL_LLM: bool = True
+    USE_LOCAL_LLM: bool = False
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL_NAME: str = "gemma2:2b"
 
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL_NAME: str = "gpt-4o-mini"
+    
+    LLM_TEMPERATURE: float = 0.2
 
     # --- Vector DB (PostgreSQL + pgvector) ---
     POSTGRES_USER: str = "workhelper"

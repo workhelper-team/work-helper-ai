@@ -69,13 +69,14 @@ def parse_precedent_detail(
     if not info:
         return None
     
+    # null 문자열 및 빈 값 예외 처리
     def clean_text(tag_name: str) -> str:
         tag = info.find(tag_name)
         if not tag or not tag.text:
             return ""
         
         # 1. 태그 원본 문자열 추출
-        raw_text = tag.get_text()
+        raw_text = tag.get_text().strip()
         if not raw_text or raw_text.lower() == "null":
             return ""
         
@@ -101,10 +102,12 @@ def parse_precedent_detail(
     matched_laws = extract_matched_laws(soup, target_laws, default_law)
     
     raw_date = clean_text("선고일자")
-    if raw_date.lower() == "null":
-        formatted_date = None
-    else:
+    clean_date = re.sub(r"\D", "", raw_date) if raw_date else ""
+    
+    if len(clean_date) == 8 and not clean_date.startswith("0001"):
         formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+    else:
+        formatted_date = None
     
     return {
         "precedent_id": int(clean_prec_id),
