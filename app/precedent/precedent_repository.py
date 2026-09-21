@@ -1,18 +1,4 @@
-import os
-import psycopg
-from dotenv import load_dotenv
-
-load_dotenv()
-
-## env 파일에서 설정을 로드하여 DB 커넥션을 반환
-def get_db_connection():
-    return psycopg.connect(
-        host=os.getenv("POSTGRES_HOST"),
-        port=os.getenv("POSTGRES_PORT", "5432"),
-        dbname=os.getenv("POSTGRES_DB", "workhelper"),
-        user=os.getenv("POSTGRES_USER", "postgres"),
-        password=os.getenv("POSTGRES_PASSWORD")
-    )
+from app.db.connection import get_db_connection
     
 ## 판례 데이터 배치 저장
 def upsert_precedents(data_list: list[dict]) -> None:

@@ -1,21 +1,11 @@
-import os
-from typing import Any, Dict
+from app.db.connection import get_db_connection
+from typing import Any, Dict, List, Tuple
+from psycopg.types.json import Json
 from dotenv import load_dotenv
-import psycopg
 
 load_dotenv()
 
-# DB 커넥션 생성 및 연결
-def get_db_connection():
-    return psycopg.connect(
-        host = os.getenv("POSTGRES_HOST"),
-        port= os.getenv("POSTGRES_PORT", "5432"),
-        dbname = os.getenv("POSTGRES_DB", "workhelper"),
-        user = os.getenv("POSTGRES_USER", "postgres"),
-        password = os.getenv("POSTGRES_PASSWORD")
-    )
-    
-# 문서 데이터를 rag.legal_documents 테이블에 저장 (UPSERT)
+## 문서 데이터를 rag.legal_documents 테이블에 저장 (UPSERT)
 def upsert_legal_document(doc_data: Dict[str, Any]) -> int:
     sql = """
     INSERT INTO rag.legal_documents (source_type, source_id, title, full_text, source_url, metadata)
@@ -50,3 +40,35 @@ def upsert_legal_document(doc_data: Dict[str, Any]) -> int:
     except Exception as e:
         print(f"[DB] 법령 데이터 저장 실패: {e}")
         raise e
+
+## 법령 원문 데이터 전체 조회
+def fetch_all_legal_documents() -> List[Tuple[int, str, str, Dict[str, Any]]]:
+    select_sql = (
+        "SELECT legal_documents_id, title, full_text, metadata FROM rag.legal_documents;"
+    )
+    
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(select_sql)
+            return cursor.fetchall()
+
+## 법령 청크 데이터를 rag.legal_chunks 테이블에 저장 (UPSERT)
+def upsert_legal_chunks(records: List[Tuple[int, int, str, str, Json]]) -> None:
+    if not records:
+        return
+    
+    upsert_sql = """
+    INSERT INTO rag.legal_chunks (legal_document_id, chunk_index, content, embedding, metadata)
+    VALUES (%s, %s, %s, %s, %s)
+    ON CONFLICT (legal_document_id, chunk_index)
+    DO UPDATE SET
+        content = EXCLUDED.content,
+        embedding = EXCLUDED.embedding,
+        metadata = EXCLUDED.metadata;
+    """
+    
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.executemany(upsert_sql, records)
+            conn.commit()
+    

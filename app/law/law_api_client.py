@@ -10,7 +10,7 @@ load_dotenv()
 BASE_URL = "http://www.law.go.kr/DRF"
 OC_ID = os.getenv("LAW_OPENAPI_OC")
 
-# 국가법령정보 공동활용 API를 활용하여 법령 정보를 API 요청으로 가져옴
+## 국가법령정보 공동활용 API를 활용하여 법령 정보를 API 요청으로 가져옴
 def fetch_law_xml(law_name: str) -> Tuple[str, bytes]:
     # 1. 법령 검색 API 호출 (검색어 URL 인코딩)
     encoded_query = quote(law_name)
