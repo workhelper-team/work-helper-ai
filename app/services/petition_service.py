@@ -1,6 +1,5 @@
 import re
 from datetime import date
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from app.core.llm import get_llm
@@ -15,16 +14,22 @@ from app.prompts.petition_prompt import get_petition_prompt
 
 
 class PetitionProcessingService:
-    # 정규식 패턴 모음
+    # 1. OCR 텍스트 정규식 패턴 (띄어쓰기/콜론 변형 대응)
     DATE_PATTERNS = [
-        r"(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})일?",
+        r"(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?",
     ]
-    PAY_DAY_PATTERN = r"(?:매월|매달|매주)\s*(\d{1,2}일?|말일|특정요일)"
+    PAY_DAY_PATTERN = r"(?:매\s*월|매\s*달|매\s*주)\s*(\d{1,2}\s*일?|말일|특정요일)"
     REPRESENTATIVE_PATTERN = r"(?:대표자?|대표이사|사용자|사업주)\s*[:：\-]?\s*([가-힣]{2,4})"
     COMPANY_NAME_PATTERN = r"(?:상\s*호|회사명|사업장명)\s*[:：\-]?\s*([가-힣A-Za-z0-9\(\)\（\）\s]{2,20})"
 
     def __init__(self):
         self.prompt = get_petition_prompt()
+
+    def _clean_ocr_text(self, text: str) -> str:
+        """OCR 추출 텍스트의 노이즈 정제 (중복 공백 및 무의미한 특수문자 완화)"""
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
 
     def _parse_date(self, text: str) -> date | None:
         for pattern in self.DATE_PATTERNS:
@@ -39,20 +44,28 @@ class PetitionProcessingService:
 
     def _extract_pay_day(self, text: str) -> str | None:
         match = re.search(self.PAY_DAY_PATTERN, text)
-        return match.group(0).strip() if match else None
+        if match:
+            return match.group(0).strip()
+        return None
 
     def _extract_representative_name(self, text: str) -> str | None:
         match = re.search(self.REPRESENTATIVE_PATTERN, text)
-        return match.group(1).strip() if match else None
+        if match:
+            return match.group(1).strip()
+        return None
 
     def _extract_company_name(self, text: str) -> str | None:
         match = re.search(self.COMPANY_NAME_PATTERN, text)
-        return match.group(1).strip() if match else None
+        if match:
+            return match.group(1).strip()
+        return None
 
     def enrich_petition_data(
         self, request: PetitionDraftRequest
     ) -> tuple[RespondentData, EmploymentFacts, dict]:
-        combined_ocr_text = "\n".join(request.evidence_texts)
+        # OCR 텍스트 결합 및 정제
+        raw_combined = "\n".join(request.evidence_texts)
+        combined_ocr_text = self._clean_ocr_text(raw_combined)
         inferred_facts: dict[str, str] = {}
 
         # 1. 사업장 정보 보완
@@ -69,7 +82,7 @@ class PetitionProcessingService:
                 resp_dict["company_name"] = comp
                 inferred_facts["respondent.company_name"] = f"OCR 추출: {comp}"
 
-        # 2. 사실관계 보완
+        # 2. 근로 조건 사실관계 보완
         facts_dict = request.facts.model_dump()
         if not facts_dict.get("pay_day"):
             pay_day = self._extract_pay_day(combined_ocr_text)
@@ -94,31 +107,30 @@ class PetitionProcessingService:
         evidence_texts: list[str],
         total_amount: int,
     ) -> str:
-        """LLM을 호출하여 격식 있는 행정 서식 진정 사유 전문 생성"""
-        # 파트너 작업자 RAG 결합 전 임시 더미 법률 컨텍스트
         dummy_legal_context = (
             "- 근로기준법 제36조(금품 청산): 사망 또는 퇴직 시 지급 사유 발생일로부터 14일 이내 금품 지급 의무\n"
             "- 근로기준법 제43조(임금 지급): 매월 1회 이상 일정한 날짜를 정하여 전액 통화 지급 원칙"
         )
 
-        llm = get_llm(temperature=0.2)
+        # 환경 변수(LLM_TEMPERATURE)를 반영하도록 인자 없이 호출
+        llm = get_llm()
         chain = self.prompt | llm | StrOutputParser()
 
         response = await chain.ainvoke({
             "complainant_name": complainant_name,
             "company_name": resp.company_name,
-            "representative_name": resp.name or "성명 미상",
-            "hire_date": str(facts.hire_date) if facts.hire_date else "미상",
-            "resignation_date": str(facts.resignation_date) if facts.resignation_date else "재직 중",
+            "representative_name": resp.name or "[확인 필요: 대표자명]",
+            "hire_date": str(facts.hire_date) if facts.hire_date else "[확인 필요: 입사일]",
+            "resignation_date": str(facts.resignation_date) if facts.resignation_date else "[확인 필요: 퇴사일]",
             "employment_status": facts.employment_status.value,
             "job_description": facts.job_description or "일반 업무",
-            "pay_day": facts.pay_day or "약정일",
+            "pay_day": facts.pay_day or "[확인 필요: 급여일]",
             "unpaid_wages": f"{facts.unpaid_wages:,}",
             "unpaid_severance_pay": f"{facts.unpaid_severance_pay:,}",
             "unpaid_other_amount": f"{facts.unpaid_other_amount:,}",
             "total_amount": f"{total_amount:,}",
             "user_statement": user_statement,
-            "evidence_texts": "\n".join(evidence_texts) if evidence_texts else "제출된 추가 증거 서류 전문 없음",
+            "evidence_texts": "\n".join(evidence_texts) if evidence_texts else "(제출된 증거 서류 발췌문 없음)",
             "legal_context": dummy_legal_context,
         })
         return response.strip()
@@ -134,7 +146,6 @@ class PetitionProcessingService:
             + enriched_facts.unpaid_other_amount
         )
 
-        # 실제 LLM 호출로 진정 사유 작성
         claim_reason = await self._generate_claim_reason_llm(
             complainant_name=request.complainant.name,
             resp=enriched_resp,

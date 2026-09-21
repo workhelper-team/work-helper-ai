@@ -31,7 +31,7 @@ class Settings(BaseSettings):
         return value
 
     # --- LLM Providers ---
-    USE_LOCAL_LLM: bool = False
+    USE_LOCAL_LLM: bool = True
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL_NAME: str = "gemma2:2b"
 
