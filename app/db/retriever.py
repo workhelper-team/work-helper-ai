@@ -2,7 +2,7 @@ from typing import List, Dict
 from app.db.connection import get_db_connection
 from app.db.embeddings import generate_embeddings
 
-## 사용자의 질문을 임베딩하여 유사도가 높은 법령/판례 청크를 검색
+## 사용자의 질문을 임베딩하여 유사도가 높은 법령 청크를 검색
 def search_similar_chunks(query: str, top_k: int = 4) -> List[Dict]:
     
     # 1. 사용자 질문 임베딩
@@ -16,7 +16,7 @@ def search_similar_chunks(query: str, top_k: int = 4) -> List[Dict]:
                 content,
                 metadata,
                 (embedding <=> %s::vector) as distance
-            FROM rag.precedent_chunks
+            FROM rag.legal_chunks
             ORDER BY distance ASC
             LIMIT %s;
             """

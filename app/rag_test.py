@@ -4,7 +4,7 @@ from app.services.chain import generate_rag_response
 load_dotenv()
 
 if __name__ == "__main__":
-    user_question = "부당해고를 당했을 때 중앙노동위원회에 구제신청을 할 수 있는 기간은 언제까지인가요?"
+    user_question = "6개월 근무 후 퇴직했는데 퇴직금을 못받았습니다. 어떻게 해야 하나요?"
     
     print(f" 질문: {user_question}\n")
     print(" 답변 생성 중...")
