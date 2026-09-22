@@ -1,5 +1,3 @@
-import re
-from datetime import date
 from langchain_core.output_parsers import StrOutputParser
 
 from app.core.llm import get_llm
@@ -11,32 +9,10 @@ from app.schemas.petition_schema import (
     EmploymentFacts,
 )
 from app.prompts.petition_prompt import get_petition_prompt
+from app.db.retriever import search_similar_chunks
 
 
 class PetitionProcessingService:
-    DATE_PATTERNS = [
-        r"(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?",
-    ]
-    PAY_DAY_PATTERN = r"(?:지급일\s*[:：]?\s*)?(?:매\s*월|매\s*달|매\s*주)\s*(\d{1,2}\s*일?|말일)"
-
-    # 회사명: 라벨 뒤에 실제 회사명이 오고, 이어서 대표자/주소/전화 등 항목이 나오는 경우까지만 잡는다.
-    COMPANY_NAME_PATTERN = (
-        r"(?:상\s*호|회사명|사업장명|\(갑\))\s*[:：\-]?\s*"
-        r"(?P<company>[가-힣A-Za-z0-9][가-힣A-Za-z0-9()（）\s]{1,30}?)(?=\s*(?:\(?\s*(?:대표자|대표이사|주소|사업장|사무실|전화|휴대폰|이메일|사업자|등록|근무|직무|고용형태|계약)|$))"
-    )
-
-    # 대표자명: '대표이사: 김철수' 또는 '대표자 김철수'에서 실제 이름만 추출
-    REPRESENTATIVE_PATTERN = (
-        r"(?:대표자|대표이사|사용자|사업주)\s*[:：\-]?\s*(?:\()?"
-        r"(?P<name>[가-힣A-Za-z]{2,8})(?=\s*(?:\)|\]|\}|,|;|\n|$|(?:주소|사업장|사무실|전화|휴대폰|이메일|등록|고용형태|계약|근무|직무)))"
-    )
-
-    # 진정인(근로자)명: 라벨이 붙은 실제 이름만 잡고, '간에'처럼 일반 문맥 단어는 제외
-    WORKER_NAME_PATTERN = (
-        r"(?:\[\s*근로자\s*\]|\(을\)|근로자|피진정인|성\s*명)\s*(?:\([가-힣]+\))?\s*(?:[:：\-]|\)|\])?\s*"
-        r"(?P<name>[가-힣]{2,5})(?=\s*(?:\)|\]|\}|,|;|\n|$|\(인\)|\(명\)|\s*\([가-힣]+\)))"
-    )
-
     def __init__(self):
         self.prompt = get_petition_prompt()
 
@@ -47,104 +23,54 @@ class PetitionProcessingService:
         val_str = str(value).strip()
         return val_str == "" or val_str.lower() == "string"
 
-    def _clean_ocr_text(self, text: str) -> str:
-        text = re.sub(r"[ \t]+", " ", text)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
+    def _build_legal_search_query(
+        self,
+        facts: EmploymentFacts,
+        user_statement: str,
+        evidence_texts: list[str],
+    ) -> str:
+        evidence_summary = "\n".join(evidence_texts)
+        return (
+            "임금체불 진정 사건의 법률 근거를 검색한다.\n"
+            f"사용자 진술: {user_statement}\n"
+            f"근무 기간: {facts.hire_date or '미상'} ~ {facts.resignation_date or '미상'}\n"
+            f"고용 상태: {facts.employment_status.value}\n"
+            f"담당 업무: {facts.job_description or '미상'}\n"
+            f"급여일: {facts.pay_day or '미상'}\n"
+            f"체불 임금: {facts.unpaid_wages:,}원, "
+            f"체불 퇴직금: {facts.unpaid_severance_pay:,}원, "
+            f"기타 체불액: {facts.unpaid_other_amount:,}원\n"
+            f"증거 문서 내용: {evidence_summary or '없음'}"
+        )
 
-    def _parse_date(self, text: str) -> date | None:
-        for pattern in self.DATE_PATTERNS:
-            match = re.search(pattern, text)
-            if match:
-                year, month, day = map(int, match.groups())
-                try:
-                    return date(year, month, day)
-                except ValueError:
-                    continue
-        return None
+    def _retrieve_legal_context(
+        self,
+        facts: EmploymentFacts,
+        user_statement: str,
+        evidence_texts: list[str],
+    ) -> str:
+        query = self._build_legal_search_query(facts, user_statement, evidence_texts)
+        retrieved_chunks = search_similar_chunks(query, top_k=4)
 
-    def _sanitize_extracted_value(self, value: str) -> str:
-        cleaned = re.sub(r"\s+", " ", value).strip()
-        cleaned = cleaned.strip(" \t\n\r()[]{}（）")
-        cleaned = re.sub(r"^(?:대표자|대표이사|사용자|사업주|근로자|피진정인|성명|회사명|상호|사업장명|갑|을)\s*[:：\-]?$", "", cleaned)
-        return cleaned.strip()
+        if not retrieved_chunks:
+            return "관련 법령 및 판례 검색 결과가 없습니다."
 
-    def _extract_pay_day(self, text: str) -> str | None:
-        match = re.search(self.PAY_DAY_PATTERN, text)
-        if match:
-            return match.group(0).strip()
-        return None
-
-    def _extract_representative_name(self, text: str) -> str | None:
-        match = re.search(self.REPRESENTATIVE_PATTERN, text)
-        if match:
-            rep = self._sanitize_extracted_value(match.group("name"))
-            if rep in ["대표", "이사", "사장", "사용", "성명", "사업주"]:
-                return None
-            return rep or None
-        return None
-
-    def _extract_worker_name(self, text: str) -> str | None:
-        match = re.search(self.WORKER_NAME_PATTERN, text)
-        if match:
-            name = self._sanitize_extracted_value(match.group("name"))
-            if name and len(name) >= 2:
-                return name
-        return None
-
-    def _extract_company_name(self, text: str) -> str | None:
-        match = re.search(self.COMPANY_NAME_PATTERN, text)
-        if match:
-            name = self._sanitize_extracted_value(match.group("company"))
-            if name and len(name) >= 2:
-                return name
-        return None
+        return "\n\n".join(
+            f"[참고] {index}\n{chunk.get('content', '')}"
+            for index, chunk in enumerate(retrieved_chunks, start=1)
+            if chunk.get("content")
+        ) or "관련 법령 및 판례 검색 결과가 없습니다."
 
     def enrich_petition_data(
         self, request: PetitionDraftRequest
     ) -> tuple[dict, RespondentData, EmploymentFacts, dict]:
-        raw_combined = "\n".join(request.evidence_texts)
-        combined_ocr_text = self._clean_ocr_text(raw_combined)
-        inferred_facts: dict[str, str] = {}
-
-        # 0. 진정인(근로자) 정보 보완
         comp_dict = request.complainant.model_dump()
-        if self._is_empty(comp_dict.get("name")):
-            worker_name = self._extract_worker_name(combined_ocr_text)
-            if worker_name:
-                comp_dict["name"] = worker_name
-                inferred_facts["complainant.name"] = f"OCR 추출: {worker_name}"
-
-        # 1. 사업장 정보 보완
-        resp_dict = request.respondent.model_dump()
-        if self._is_empty(resp_dict.get("name")):
-            name = self._extract_representative_name(combined_ocr_text)
-            if name:
-                resp_dict["name"] = name
-                inferred_facts["respondent.name"] = f"OCR 추출: {name}"
-
-        if self._is_empty(resp_dict.get("company_name")):
-            comp = self._extract_company_name(combined_ocr_text)
-            if comp:
-                resp_dict["company_name"] = comp
-                inferred_facts["respondent.company_name"] = f"OCR 추출: {comp}"
-
-        # 2. 근로 조건 사실관계 보완
-        facts_dict = request.facts.model_dump()
-        if self._is_empty(facts_dict.get("pay_day")):
-            pay_day = self._extract_pay_day(combined_ocr_text)
-            if pay_day:
-                facts_dict["pay_day"] = pay_day
-                inferred_facts["facts.pay_day"] = f"OCR 추출: {pay_day}"
-
-        # hire_date가 없거나 오늘 기본 날짜인 경우 추출 시도
-        if not facts_dict.get("hire_date") or self._is_empty(str(facts_dict.get("hire_date"))):
-            h_date = self._parse_date(combined_ocr_text)
-            if h_date:
-                facts_dict["hire_date"] = h_date
-                inferred_facts["facts.hire_date"] = f"OCR 추출: {h_date}"
-
-        return comp_dict, RespondentData(**resp_dict), EmploymentFacts(**facts_dict), inferred_facts
+        return (
+            comp_dict,
+            request.respondent,
+            request.facts,
+            {},
+        )
 
     def _build_fallback_claim_reason(
         self,
@@ -181,13 +107,14 @@ class PetitionProcessingService:
         facts: EmploymentFacts,
         user_statement: str,
         total_amount: int,
+        evidence_texts: list[str] | None = None,
     ) -> str:
-        dummy_legal_context = (
-            "- 근로기준법 제36조(금품 청산): 사망 또는 퇴직 시 14일 이내 일체의 금품 지급 의무\n"
-            "- 근로기준법 제43조(임금 지급): 매월 1회 이상 통화로 전액 지급"
-        )
-
         try:
+            legal_context = self._retrieve_legal_context(
+                facts,
+                user_statement,
+                evidence_texts or [],
+            )
             llm = get_llm()
             chain = self.prompt | llm | StrOutputParser()
 
@@ -206,7 +133,7 @@ class PetitionProcessingService:
                 "unpaid_other_amount": f"{facts.unpaid_other_amount:,}",
                 "total_amount": f"{total_amount:,}",
                 "user_statement": user_statement if not self._is_empty(user_statement) else "임금 체불로 인한 진정 제기",
-                "legal_context": dummy_legal_context,
+                "legal_context": legal_context,
             }
 
             print(f"[DEBUG LLM INPUT] >>> {input_payload}")
@@ -221,7 +148,7 @@ class PetitionProcessingService:
                     resp,
                     facts,
                     user_statement,
-                    [],
+                    evidence_texts or [],
                     total_amount,
                 )
 
@@ -235,7 +162,7 @@ class PetitionProcessingService:
                 resp,
                 facts,
                 user_statement,
-                [],
+                evidence_texts or [],
                 total_amount,
             )
 
@@ -256,6 +183,7 @@ class PetitionProcessingService:
             facts=enriched_facts,
             user_statement=request.user_statement,
             total_amount=total_amount,
+            evidence_texts=request.evidence_texts,
         )
 
         from app.schemas.petition_schema import ComplainantData
