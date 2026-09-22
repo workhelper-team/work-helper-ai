@@ -50,7 +50,11 @@ async def extract_document_text(
         # 내부 OCR 결과를 명세 규격(EvidenceAnalysisResponse)으로 변환
         return EvidenceAnalysisResponse(
             extracted_text=result.extracted_text,
-            analysis_result={"confidence": result.confidence, "document_id": result.document_id},
+            analysis_result={
+                "confidence": result.confidence,
+                "document_id": result.document_id,
+                "preprocessed_data": result.preprocessed_data,
+            },
             success=result.success,
             message=result.message or "증거 이미지 분석이 완료되었습니다.",
         )

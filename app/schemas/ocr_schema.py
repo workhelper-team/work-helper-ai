@@ -31,6 +31,9 @@ class OCRResponse(BaseModel):
 
     document_id: str
     extracted_text: str
+    preprocessed_data: dict | None = Field(
+        default=None, description="OCR 텍스트에서 전처리 및 추출된 정형 데이터"
+    )
     confidence: Optional[float] = Field(
         default=None, description="추출 텍스트에 대한 신뢰도 점수 (0.0 ~ 1.0)"
     )
