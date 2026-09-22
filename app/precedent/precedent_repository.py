@@ -81,7 +81,8 @@ def fetch_all_precedents() -> List[Tuple]:
             return cursor.fetchall()
         
 ## 판례 청크 데이터를 rag.legal_chunks 테이블에 저장 (UPSERT)
-def upsert_precedent_chunks(records: List[Tuple[int, int, str, str, Json]]) -> None:
+# 외부 단일 conn 사용 및 매 판례 저장 완료 후 커밋
+def upsert_precedent_chunks(conn, records: List[Tuple[int, int, str, str, Json]]) -> None:
     if not records:
         return
     
@@ -95,8 +96,7 @@ def upsert_precedent_chunks(records: List[Tuple[int, int, str, str, Json]]) -> N
         metadata = EXCLUDED.metadata;
     """
     
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.executemany(upsert_sql, records)
-            conn.commit()
+    with conn.cursor() as cursor:
+        cursor.executemany(upsert_sql, records)
+        conn.commit()
     
