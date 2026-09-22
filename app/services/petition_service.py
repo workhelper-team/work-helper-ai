@@ -11,6 +11,7 @@ from app.schemas.petition_schema import (
     EmploymentFacts,
 )
 from app.prompts.petition_prompt import get_petition_prompt
+from app.db.retriever import search_similar_chunks
 
 
 class PetitionProcessingService:
@@ -100,6 +101,44 @@ class PetitionProcessingService:
                 return name
         return None
 
+    def _build_legal_search_query(
+        self,
+        facts: EmploymentFacts,
+        user_statement: str,
+        evidence_texts: list[str],
+    ) -> str:
+        evidence_summary = "\n".join(evidence_texts)
+        return (
+            "임금체불 진정 사건의 법률 근거를 검색한다.\n"
+            f"사용자 진술: {user_statement}\n"
+            f"근무 기간: {facts.hire_date or '미상'} ~ {facts.resignation_date or '미상'}\n"
+            f"고용 상태: {facts.employment_status.value}\n"
+            f"담당 업무: {facts.job_description or '미상'}\n"
+            f"급여일: {facts.pay_day or '미상'}\n"
+            f"체불 임금: {facts.unpaid_wages:,}원, "
+            f"체불 퇴직금: {facts.unpaid_severance_pay:,}원, "
+            f"기타 체불액: {facts.unpaid_other_amount:,}원\n"
+            f"증거 문서 내용: {evidence_summary or '없음'}"
+        )
+
+    def _retrieve_legal_context(
+        self,
+        facts: EmploymentFacts,
+        user_statement: str,
+        evidence_texts: list[str],
+    ) -> str:
+        query = self._build_legal_search_query(facts, user_statement, evidence_texts)
+        retrieved_chunks = search_similar_chunks(query, top_k=4)
+
+        if not retrieved_chunks:
+            return "관련 법령 및 판례 검색 결과가 없습니다."
+
+        return "\n\n".join(
+            f"[참고] {index}\n{chunk.get('content', '')}"
+            for index, chunk in enumerate(retrieved_chunks, start=1)
+            if chunk.get("content")
+        ) or "관련 법령 및 판례 검색 결과가 없습니다."
+
     def enrich_petition_data(
         self, request: PetitionDraftRequest
     ) -> tuple[dict, RespondentData, EmploymentFacts, dict]:
@@ -181,13 +220,14 @@ class PetitionProcessingService:
         facts: EmploymentFacts,
         user_statement: str,
         total_amount: int,
+        evidence_texts: list[str] | None = None,
     ) -> str:
-        dummy_legal_context = (
-            "- 근로기준법 제36조(금품 청산): 사망 또는 퇴직 시 14일 이내 일체의 금품 지급 의무\n"
-            "- 근로기준법 제43조(임금 지급): 매월 1회 이상 통화로 전액 지급"
-        )
-
         try:
+            legal_context = self._retrieve_legal_context(
+                facts,
+                user_statement,
+                evidence_texts or [],
+            )
             llm = get_llm()
             chain = self.prompt | llm | StrOutputParser()
 
@@ -206,7 +246,7 @@ class PetitionProcessingService:
                 "unpaid_other_amount": f"{facts.unpaid_other_amount:,}",
                 "total_amount": f"{total_amount:,}",
                 "user_statement": user_statement if not self._is_empty(user_statement) else "임금 체불로 인한 진정 제기",
-                "legal_context": dummy_legal_context,
+                "legal_context": legal_context,
             }
 
             print(f"[DEBUG LLM INPUT] >>> {input_payload}")
@@ -256,6 +296,7 @@ class PetitionProcessingService:
             facts=enriched_facts,
             user_statement=request.user_statement,
             total_amount=total_amount,
+            evidence_texts=request.evidence_texts,
         )
 
         from app.schemas.petition_schema import ComplainantData
