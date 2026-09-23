@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 
-from app.services.chain import labor_rag_pipeline
+from app.services.consultation_service import labor_rag_pipeline
 
 load_dotenv()
 

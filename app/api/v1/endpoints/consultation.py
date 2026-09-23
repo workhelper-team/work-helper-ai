@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 from app.schemas.consultation_schema import ConsultationRequest, ConsultationResponse
-from app.services.chain import labor_rag_pipeline
+from app.services.consultation_service import labor_rag_pipeline
 
 router = APIRouter()
 

@@ -4,6 +4,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 
 from app.db.retriever import search_legal_context
+from app.schemas.consultation_schema import ConsultationResponse
+from app.utils.formatters import format_full_chat_history
 from app.prompts.consultation_prompt import (
     PROFANITY_PROMPT, # 욕설/비속어 포함 여부 필터링
     DOMAIN_CHECK_PROMPT, # 노동/노무 관련 질문인지 필터링
@@ -12,7 +14,6 @@ from app.prompts.consultation_prompt import (
     FINAL_RESPONSE_PROMPT, # 사용자 질문에 대한 AI 최종 답변
     PRECEDENT_SUMMARY_PROMPT # 판례 판결내용 요약
 )
-from app.schemas.consultation_schema import ConsultationResponse
 
 ## LLM 선언
 llm_json = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind(response_format={"type": "json_object"})
