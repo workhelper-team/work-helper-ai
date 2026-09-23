@@ -1,7 +1,9 @@
 from datetime import date
 from enum import Enum
+from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
+from app.schemas.consultation_schema import ConsultationMessage
 
 
 # ---------------------------------------------------------------------------
@@ -88,16 +90,22 @@ class EmploymentFacts(BaseModel):
 # ---------------------------------------------------------------------------
 # 2. 백엔드 -> AI 요청 (Request)
 # ---------------------------------------------------------------------------
+class EvidenceDocumentSet(BaseModel):
+    """증거 문서 분석 결과 DTO."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    extracted_text: str
+    analysis_summary: str
+
+
 class PetitionDraftRequest(BaseModel):
     """진정서 초안 작성 요청 DTO"""
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     case_id: int = Field(..., description="백엔드 사건 고유 식별자")
-    complainant: ComplainantData = Field(..., description="진정인 인적사항")
-    respondent: RespondentData = Field(..., description="피진정인/사업장 기본 정보")
-    facts: EmploymentFacts = Field(default_factory=EmploymentFacts, description="사용자 폼 입력 사실관계")
-    user_statement: str = Field(..., description="사용자가 서술한 피해 정황 요약")
-    evidence_texts: list[str] = Field(default_factory=list, description="OCR로 추출된 증거 문서 텍스트 배열")
+    chat_history: List[ConsultationMessage]
+    evidence_document: Optional[EvidenceDocumentSet] = None
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +118,6 @@ class GeneratedPetitionContent(BaseModel):
     claim_reason: str = Field(..., description="고용노동부 서식용 진정 이유 (육하원칙 상세 경위 전문)")
     target_labor_office: str | None = Field(default=None, description="추천 관할 고용노동(지)청")
     total_unpaid_amount: int = Field(..., description="합산된 총 체불금액 (원)")
-    inferred_facts: dict | None = Field(default=None, description="OCR을 통해 새로 채워지거나 보정된 필드 요약")
 
 
 class PetitionDraftResponse(BaseModel):

@@ -10,15 +10,29 @@ class OCRDocumentType(str, Enum):
     IMAGE = "IMAGE"
     PDF = "PDF"
 
-class EvidenceAnalysisResponse(BaseModel):
+
+class EvidenceAnalysisRequest(BaseModel):
+    """증거 문서 분석 요청 DTO."""
+
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    file_url: str
+    user_context: Optional[str] = None
+
+
+class EvidenceAnalysisResponse(BaseModel):
+    """증거 문서 분석 결과 DTO."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     extracted_text: str
-    analysis_result: dict | None = None
-    success: bool = True
-    message: str = "증거 이미지 분석이 완료되었습니다."
+    analysis_summary: str
+
 
 class OCRRequest(BaseModel):
     """Spring Boot로부터 전달받는 OCR 요청 스키마."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     document_id: str = Field(..., description="원본 문서 식별자")
     file_url: str = Field(..., description="OCR 대상 파일에 접근 가능한 URL")
@@ -26,8 +40,11 @@ class OCRRequest(BaseModel):
         default=OCRDocumentType.IMAGE, description="문서 종류 (IMAGE, PDF)"
     )
 
+
 class OCRResponse(BaseModel):
     """OCR 처리 결과 응답 스키마."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     document_id: str
     extracted_text: str

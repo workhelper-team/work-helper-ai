@@ -2,11 +2,14 @@
 
 import io
 import logging
+import mimetypes
 import os
 import re
 from datetime import date
 from typing import Callable
+from urllib.parse import urlparse
 
+import httpx
 import pymupdf
 from PIL import Image, ImageEnhance
 import pytesseract
@@ -145,6 +148,40 @@ def _infer_paddleocr(image: Image.Image) -> str:
     return "\n".join(extracted_lines).strip()
 
 
+async def _download_file(file_url: str) -> tuple[bytes, str]:
+    """S3 presigned URL에서 파일 바이트와 응답 MIME 타입을 가져옵니다."""
+    async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
+        response = await client.get(file_url)
+        response.raise_for_status()
+        return response.content, response.headers.get("content-type", "")
+
+
+def _detect_document_type(
+    file_bytes: bytes,
+    filename: str = "",
+    content_type: str = "",
+) -> OCRDocumentType:
+    """파일 내용과 메타데이터를 이용해 PDF 또는 이미지 유형을 판별합니다."""
+    if file_bytes.startswith(b"%PDF-"):
+        return OCRDocumentType.PDF
+
+    normalized_content_type = content_type.split(";", 1)[0].lower().strip()
+    if normalized_content_type == "application/pdf":
+        return OCRDocumentType.PDF
+
+    suffix = os.path.splitext(urlparse(filename).path)[1].lower()
+    guessed_type = normalized_content_type or mimetypes.guess_type(suffix)[0] or ""
+    if guessed_type.startswith("image/"):
+        return OCRDocumentType.IMAGE
+
+    try:
+        with Image.open(io.BytesIO(file_bytes)) as image:
+            image.verify()
+    except (Image.UnidentifiedImageError, OSError):
+        raise ValueError("PDF 또는 지원되는 이미지 파일이 아닙니다.")
+    return OCRDocumentType.IMAGE
+
+
 # ---------------------------------------------------------------------------
 # 공통 파이프라인 (PDF/이미지 전처리 및 디스패처)
 # ---------------------------------------------------------------------------
@@ -193,12 +230,14 @@ async def extract_text_from_document(
         os.environ.get("OCR_ENGINE"),
     )
 
+    content_type = ""
     if request is not None:
         doc_id = request.document_id
-        doc_type = request.document_type
+        filename = request.file_url
+        if file_bytes is None:
+            file_bytes, content_type = await _download_file(request.file_url)
     else:
         doc_id = filename
-        doc_type = document_type
 
     if not file_bytes:
         return OCRResponse(
@@ -208,6 +247,12 @@ async def extract_text_from_document(
             success=False,
             message="추출할 파일 데이터가 비어 있습니다.",
         )
+
+    doc_type = _detect_document_type(
+        file_bytes=file_bytes,
+        filename=filename,
+        content_type=content_type,
+    )
 
     # 엔진 선택
     if "paddle" in engine_name:
