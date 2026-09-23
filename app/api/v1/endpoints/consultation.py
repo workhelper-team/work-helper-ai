@@ -17,7 +17,8 @@ async def consult_legal_question(request: ConsultationRequest) -> ConsultationRe
         response = await labor_rag_pipeline(request.question)
         return response
     except Exception as e:
+        print(f"법률 상담 생성 오류: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"법률 상담 생성 중 오류가 발생했습니다: {str(e)}"
+            detail="법률 상담 생성 중 오류가 발생했습니다."
         )

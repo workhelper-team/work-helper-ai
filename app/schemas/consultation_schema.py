@@ -25,7 +25,6 @@ class Precedents(BaseModel):
 class ConsultationRequest(BaseModel):
     """구조화된 법률 분석 요청 DTO"""
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-    case_context: str = Field(..., description="채팅창 번호 등 메타데이터")
     chat_history: List[ConsultationMessage] = Field(None, description="채팅 기록 (사람, AI)")
     question: str = Field(..., description="사용자가 한 질문")
 

@@ -23,7 +23,8 @@ async def handle_create_petition(
         return await petition_service.generate_draft(request)
 
     except Exception as e:
+        print(f"진정서 초안 생성 오류: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"진정서 초안 생성 중 오류가 발생했습니다: {str(e)}",
+            detail="진정서 초안 생성 중 오류가 발생했습니다.",
         )

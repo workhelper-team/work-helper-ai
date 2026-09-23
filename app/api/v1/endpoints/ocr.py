@@ -62,9 +62,10 @@ async def extract_document_text(
     except HTTPException:
         raise
     except Exception as e:
+        print(f"OCR 텍스트 추출 오류: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OCR 텍스트 추출 중 서버 내부 오류가 발생했습니다: {str(e)}",
+            detail="OCR 텍스트 추출 중 서버 내부 오류가 발생했습니다.",
         )
     finally:
         # 메모리 누수 방지를 위한 파일 핸들 정리
