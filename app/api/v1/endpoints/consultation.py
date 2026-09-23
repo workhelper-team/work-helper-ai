@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 from app.schemas.consultation_schema import ConsultationRequest, ConsultationResponse
-from app.services.rag_service import generate_legal_consultation
+from app.services.chain import labor_rag_pipeline
 
 router = APIRouter()
 
@@ -14,7 +14,7 @@ router = APIRouter()
 )
 async def consult_legal_question(request: ConsultationRequest) -> ConsultationResponse:
     try:
-        response = await generate_legal_consultation(request)
+        response = await labor_rag_pipeline(request.question)
         return response
     except Exception as e:
         raise HTTPException(

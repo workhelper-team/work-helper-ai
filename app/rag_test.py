@@ -16,7 +16,7 @@ def process_labor_consultation(user_question: str) -> str:
 def test_pipeline():
     test_cases = [
         # 케이스 1 : 욕설 검증
-        "야 이 개새끼들이 돈 안주는데 어떻게 함?",
+        "야 시발 돈 안주는데 어떻게 함?",
         
         # 케이스 2 : 도메인 이탈
         "맛있는 김치찌개 레시피 좀 알려줘",
