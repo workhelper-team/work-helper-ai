@@ -1,6 +1,6 @@
 from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
 
-from app.core.llm import get_llm
 from app.schemas.petition_schema import (
     PetitionDraftRequest,
     PetitionDraftResponse,
@@ -115,7 +115,7 @@ class PetitionProcessingService:
                 user_statement,
                 evidence_texts or [],
             )
-            llm = get_llm()
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
             chain = self.prompt | llm | StrOutputParser()
 
             input_payload = {

@@ -18,7 +18,7 @@ from app.schemas.consultation_schema import ConsultationResponse
 llm_json = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind(response_format={"type": "json_object"})
 llm_text = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
 
-def labor_rag_pipeline(user_input: str) -> str:
+async def labor_rag_pipeline(user_input: str) -> str:
     parser = JsonOutputParser()
     
     # 1. 욕설/비속어 검증
