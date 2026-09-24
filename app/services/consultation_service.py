@@ -1,10 +1,11 @@
 import json
+from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 
 from app.db.retriever import search_legal_context
-from app.schemas.consultation_schema import ConsultationResponse
+from app.schemas.consultation_schema import ConsultationResponse, ConsultationRequest, Precedents
 from app.utils.formatters import format_full_chat_history
 from app.prompts.consultation_prompt import (
     PROFANITY_PROMPT, # 욕설/비속어 포함 여부 필터링
@@ -19,12 +20,18 @@ from app.prompts.consultation_prompt import (
 llm_json = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind(response_format={"type": "json_object"})
 llm_text = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
 
-async def labor_rag_pipeline(user_input: str) -> str:
+## 파이프라인 시작
+async def labor_rag_pipeline(request: ConsultationRequest) -> str:
+    
     parser = JsonOutputParser()
+    
+    # 0. 데이터 준비
+    full_chat_history = format_full_chat_history(request.chat_history or []) # 전체 이전 대화 기록
+    question = request.question # 사용자 질문
     
     # 1. 욕설/비속어 검증
     profanity_chain = ChatPromptTemplate.from_template(PROFANITY_PROMPT) | llm_json | parser
-    profanity_res = profanity_chain.invoke({"user_input": user_input})
+    profanity_res = profanity_chain.invoke({"user_input": question})
     
     if not profanity_res.get("is_safe", True):
         return ConsultationResponse(
@@ -34,7 +41,7 @@ async def labor_rag_pipeline(user_input: str) -> str:
 
     # 2. 도메인 적합성 검증
     domain_chain = ChatPromptTemplate.from_template(DOMAIN_CHECK_PROMPT) | llm_json | parser
-    domain_res = domain_chain.invoke({"user_input": user_input})
+    domain_res = domain_chain.invoke({"user_input": question})
     
     if not domain_res.get("is_labor_domain", True):
         return ConsultationResponse(
@@ -44,7 +51,10 @@ async def labor_rag_pipeline(user_input: str) -> str:
     
     # 3. 일상 용어 -> 법률 용어로 재작성 및 의도 분류
     rewrite_chain = ChatPromptTemplate.from_template(QUERY_REWRITE_PROMPT) | llm_json | parser
-    rewrite_res = rewrite_chain.invoke({"user_input": user_input})
+    rewrite_res = rewrite_chain.invoke({
+        "full_chat_history":full_chat_history,
+        "question": question}
+    )
     
     rewritten_query = rewrite_res.get("rewritten_query") # 재작성된 사용자 질문
     intent = rewrite_res.get("intent") # 사용자의 질문 의도 (법령 개념 or 법률 상담)
@@ -71,7 +81,8 @@ async def labor_rag_pipeline(user_input: str) -> str:
     })
     
     # 4-3. 판례가 있을 경우 판결 전문을 요약하고 API 스키마 규격에 맞춰 데이터 재구성
-    precedents_list = []
+    precedents_list: List[Precedents] = []
+    
     if include_precedents and retrieved_data.get("precedents"):
         prec_summary_chain = ChatPromptTemplate.from_template(PRECEDENT_SUMMARY_PROMPT) | llm_text | StrOutputParser()
         
@@ -81,21 +92,25 @@ async def labor_rag_pipeline(user_input: str) -> str:
             
             summarized_content = prec_summary_chain.invoke({"precedent_content": raw_content})
             
-            precedents_list.append({
-                "case_number": metadata.get("case_number", ""),
-                "case_name": metadata.get("case_name", ""),
-                "court_name": metadata.get("court_name", ""),
-                "judgment_date": metadata.get("judgment_date", ""),
-                "judgment_type": metadata.get("judgment_type", ""),
-                "content": summarized_content
-            })
+            precedents_list.append(
+                Precedents(
+                    case_number=metadata.get("case_number", ""),
+                    case_name=metadata.get("case_name", ""),
+                    court_name=metadata.get("court_name", ""),
+                    judgment_data=metadata.get("judgment_date", ""),
+                    judgment_type=metadata.get("judgment_type", ""),
+                    content=summarized_content
+                )
+            )
     
     # 5. 최종 답변
     final_chain = ChatPromptTemplate.from_template(FINAL_RESPONSE_PROMPT) | llm_text | StrOutputParser()
     answer_text = final_chain.invoke({
+        "full_chat_history": full_chat_history,
         "analysis_data": json.dumps(analysis_res, ensure_ascii=False, indent=2)
     })
     
+    # 6. API에 맞는 스키마 구조로 반환
     return ConsultationResponse(
         answer=answer_text,
         precedents=precedents_list

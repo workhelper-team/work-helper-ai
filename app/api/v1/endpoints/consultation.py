@@ -14,7 +14,7 @@ router = APIRouter()
 )
 async def consult_legal_question(request: ConsultationRequest) -> ConsultationResponse:
     try:
-        response = await labor_rag_pipeline(request.question)
+        response = await labor_rag_pipeline(request)
         return response
     except Exception as e:
         print(f"법률 상담 생성 오류: {e}")
