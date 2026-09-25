@@ -1,5 +1,6 @@
 import json
-from typing import Dict, Any, List
+import asyncio
+from typing import List
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
@@ -17,11 +18,11 @@ from app.prompts.consultation_prompt import (
 )
 
 ## LLM 선언
-llm_json = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind(response_format={"type": "json_object"})
-llm_text = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+llm_json = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind(response_format={"type": "json_object"}) # 분석용
+llm_text = ChatOpenAI(model="gpt-4o-mini", temperature=0.2) # 최종 답변용
 
-## 파이프라인 시작
-async def labor_rag_pipeline(request: ConsultationRequest) -> str:
+## 파이프라인 시작 (비동기 처리)
+async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationResponse:
     
     parser = JsonOutputParser()
     
@@ -31,7 +32,7 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> str:
     
     # 1. 욕설/비속어 검증
     profanity_chain = ChatPromptTemplate.from_template(PROFANITY_PROMPT) | llm_json | parser
-    profanity_res = profanity_chain.invoke({"user_input": question})
+    profanity_res = await profanity_chain.ainvoke({"user_input": question})
     
     if not profanity_res.get("is_safe", True):
         return ConsultationResponse(
@@ -41,7 +42,7 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> str:
 
     # 2. 도메인 적합성 검증
     domain_chain = ChatPromptTemplate.from_template(DOMAIN_CHECK_PROMPT) | llm_json | parser
-    domain_res = domain_chain.invoke({"user_input": question})
+    domain_res = await domain_chain.ainvoke({"user_input": question})
     
     if not domain_res.get("is_labor_domain", True):
         return ConsultationResponse(
@@ -51,22 +52,30 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> str:
     
     # 3. 일상 용어 -> 법률 용어로 재작성 및 의도 분류
     rewrite_chain = ChatPromptTemplate.from_template(QUERY_REWRITE_PROMPT) | llm_json | parser
-    rewrite_res = rewrite_chain.invoke({
+    rewrite_res = await rewrite_chain.ainvoke({
         "full_chat_history":full_chat_history,
-        "question": question}
-    )
+        "question": question
+    })
     
     rewritten_query = rewrite_res.get("rewritten_query") # 재작성된 사용자 질문
     intent = rewrite_res.get("intent") # 사용자의 질문 의도 (법령 개념 or 법률 상담)
     include_precedents = (intent == "CASE_DISPUTE") # CASE_DISPUTE(분쟁) 시에만 판례 검색 포함
     
-    # 4. DB 검색 및 사실 분석
+    # 4. 하이브리드 RAG DB 검색 (BM25 + pgvector 융합된 RRF 방식)
     retrieved_data = search_legal_context(
         query=rewritten_query,
         top_k_law=3,
-        top_k_precedent=3,
-        include_precedents=include_precedents
+        top_k_precedent=2,
+        include_precedents=include_precedents,
+        vector_weight=0.6, # 의미 검색 가중치 60%
+        bm25_weight=0.4 # 키워드 검색 가중치 40%
     )
+    
+    print(f"[DEBUG] 원본 질문: {question}")
+    print(f"[DEBUG] 재작성된 질문: {rewritten_query}")
+    print(f"[DEBUG] 검색된 법령 수: {len(retrieved_data['laws'])}")
+    for i, law in enumerate(retrieved_data['laws']):
+        print(f"[DEBUG] 법령 {i+1} 내용: {law['content'][:50]}...")
     
     # 4-1. 법령 컨텍스트 생성
     law_context_str = ""
@@ -75,43 +84,60 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> str:
             
     # 4-2. 법령 기반 사실 분석 실행
     analysis_chain = ChatPromptTemplate.from_template(ANALYSIS_PROMPT) | llm_json | parser
-    analysis_res = analysis_chain.invoke({
+    analysis_res = await analysis_chain.ainvoke({
         "context": law_context_str,
         "question": rewritten_query
     })
     
-    # 4-3. 판례가 있을 경우 판결 전문을 요약하고 API 스키마 규격에 맞춰 데이터 재구성
+    # 4-3. 판례가 있을 경우 판결 전문 요약 및 스키마 규격 변환
     precedents_list: List[Precedents] = []
     
     if include_precedents and retrieved_data.get("precedents"):
         prec_summary_chain = ChatPromptTemplate.from_template(PRECEDENT_SUMMARY_PROMPT) | llm_text | StrOutputParser()
         
+        # 사건 번호(case_number) 기준 중복 제거 및 단일 판례 비동기 요약
+        seen_case_numbers = set()
+        unique_precedents =[]
+        
         for prec in retrieved_data["precedents"]:
-            metadata = prec.get("metadata", {})
-            raw_content = prec.get("content", "")
+            metadata = prec.get("metadata")
+            case_no = metadata.get("case_number")
+            if case_no and case_no in seen_case_numbers:
+                continue
+            seen_case_numbers.add(case_no)
+            unique_precedents.append(prec)
             
-            summarized_content = prec_summary_chain.invoke({"precedent_content": raw_content})
+        # 개별 판례 비동기 요약 태스크 생성
+        async def summarize_single_precedent(prec: dict) -> Precedents:
+            metadata = prec.get("metadata")
+            raw_content = prec.get("content")
             
-            precedents_list.append(
-                Precedents(
-                    case_number=metadata.get("case_number", ""),
-                    case_name=metadata.get("case_name", ""),
-                    court_name=metadata.get("court_name", ""),
-                    judgment_data=metadata.get("judgment_date", ""),
-                    judgment_type=metadata.get("judgment_type", ""),
-                    content=summarized_content
-                )
+            # 비동기 LLM 요약 호출
+            summarized_content = await prec_summary_chain.ainvoke({"precedent_content": raw_content})
+            
+            return Precedents(
+                case_number=metadata.get("case_number", ""),
+                case_name=metadata.get("case_name", ""),
+                court_name=metadata.get("court_name", ""),
+                judgment_data=metadata.get("judgment_date", ""),
+                judgment_type=metadata.get("judgment_type", ""),
+                content=summarized_content
             )
+            
+        # 여러 판례를 동시에 병렬로 비동기 요약
+        precedents_list = await asyncio.gather(
+            *[summarize_single_precedent(prec) for prec in unique_precedents]
+        )
     
-    # 5. 최종 답변
+    # 5. 최종 답변 생성
     final_chain = ChatPromptTemplate.from_template(FINAL_RESPONSE_PROMPT) | llm_text | StrOutputParser()
-    answer_text = final_chain.invoke({
+    answer_text = await final_chain.ainvoke({
         "full_chat_history": full_chat_history,
         "analysis_data": json.dumps(analysis_res, ensure_ascii=False, indent=2)
     })
     
-    # 6. API에 맞는 스키마 구조로 반환
+    # 6. API 스키마 규격으로 최종 객체 반환
     return ConsultationResponse(
         answer=answer_text,
-        precedents=precedents_list
+        precedents=list(precedents_list)
     )
