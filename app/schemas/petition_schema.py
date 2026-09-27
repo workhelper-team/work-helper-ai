@@ -3,7 +3,6 @@ from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
-from app.schemas.consultation_schema import ConsultationMessage
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +89,15 @@ class EmploymentFacts(BaseModel):
 # ---------------------------------------------------------------------------
 # 2. 백엔드 -> AI 요청 (Request)
 # ---------------------------------------------------------------------------
+class ChatMessage(BaseModel):
+    """진정서 작성을 위한 채팅 메시지 DTO."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    role: str
+    content: str
+
+
 class EvidenceDocumentSet(BaseModel):
     """증거 문서 분석 결과 DTO."""
 
@@ -104,7 +112,7 @@ class PetitionDraftRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     case_id: int = Field(..., description="백엔드 사건 고유 식별자")
-    chat_history: List[ConsultationMessage]
+    chat_history: List[ChatMessage]
     evidence_document: Optional[EvidenceDocumentSet] = None
 
 
@@ -116,8 +124,8 @@ class GeneratedPetitionContent(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     claim_reason: str = Field(..., description="고용노동부 서식용 진정 이유 (육하원칙 상세 경위 전문)")
-    target_labor_office: str | None = Field(default=None, description="추천 관할 고용노동(지)청")
-    total_unpaid_amount: int = Field(..., description="합산된 총 체불금액 (원)")
+    target_labor_office: Optional[str] = Field(default=None, description="추천 관할 고용노동(지)청")
+    total_unpaid_amount: int = Field(default=0, description="합산된 총 체불금액 (원)")
 
 
 class PetitionDraftResponse(BaseModel):

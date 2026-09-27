@@ -1,15 +1,28 @@
-from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI
+import json
 
+from langchain_core.output_parsers import StrOutputParser
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel
+
+from app.core.config import settings
 from app.schemas.petition_schema import (
+    ComplainantData,
+    EmploymentFacts,
+    GeneratedPetitionContent,
     PetitionDraftRequest,
     PetitionDraftResponse,
-    GeneratedPetitionContent,
     RespondentData,
-    EmploymentFacts,
 )
 from app.prompts.petition_prompt import get_petition_prompt
 from app.db.retriever import search_similar_chunks
+
+
+class _ExtractedPetitionData(BaseModel):
+    complainant: ComplainantData
+    respondent: RespondentData
+    facts: EmploymentFacts
+    user_summary: str
 
 
 class PetitionProcessingService:
@@ -22,6 +35,51 @@ class PetitionProcessingService:
             return True
         val_str = str(value).strip()
         return val_str == "" or val_str.lower() == "string"
+
+    def _create_llm(self) -> ChatOllama | ChatOpenAI:
+        """환경 설정에 따라 로컬 Ollama 또는 OpenAI 모델을 생성합니다."""
+        if settings.USE_LOCAL_LLM:
+            ollama_args = {
+                "base_url": settings.OLLAMA_BASE_URL,
+                "model": settings.OLLAMA_MODEL_NAME,
+                "temperature": settings.LLM_TEMPERATURE,
+            }
+            if "qwen" in settings.OLLAMA_MODEL_NAME.lower():
+                try:
+                    return ChatOllama(**ollama_args, reasoning=False)
+                except TypeError:
+                    return ChatOllama(**ollama_args)
+            return ChatOllama(**ollama_args)
+
+        return ChatOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            model=settings.OPENAI_MODEL_NAME,
+            temperature=settings.LLM_TEMPERATURE,
+        )
+
+    async def _extract_petition_data(
+        self, request: PetitionDraftRequest
+    ) -> _ExtractedPetitionData:
+        conversation = "\n".join(
+            f"[{message.role}] {message.content}" for message in request.chat_history
+        )
+        evidence_hint = "증거 문서가 제공되지 않았습니다."
+        if request.evidence_document:
+            evidence_hint = (
+                f"정제된 문서 텍스트:\n{request.evidence_document.extracted_text}\n"
+                f"문서 분석 요약:\n{request.evidence_document.analysis_summary}"
+            )
+
+        extraction_prompt = (
+            "대화와 증거 문서를 바탕으로 진정서 작성에 필요한 정보를 추출하세요. "
+            "대화에 없는 사실은 추측하지 말고, 모르는 문자열은 빈 문자열, 날짜 및 선택값은 null, "
+            "금액은 0으로 설정하세요. complainant.name과 respondent.company_name도 모르면 빈 문자열로 두세요. "
+            "user_summary에는 사용자가 설명한 주요 피해 경위를 간결하게 요약하세요.\n\n"
+            f"[대화 기록]\n{conversation}\n\n[참고 증거 문서]\n{evidence_hint}"
+        )
+        llm = self._create_llm()
+        extractor = llm.with_structured_output(_ExtractedPetitionData)
+        return await extractor.ainvoke(extraction_prompt)
 
     def _build_legal_search_query(
         self,
@@ -40,7 +98,7 @@ class PetitionProcessingService:
             f"체불 임금: {facts.unpaid_wages:,}원, "
             f"체불 퇴직금: {facts.unpaid_severance_pay:,}원, "
             f"기타 체불액: {facts.unpaid_other_amount:,}원\n"
-            f"증거 문서 내용: {evidence_summary or '없음'}"
+            f"증거 문서 내용 및 분석: {evidence_summary or '없음'}"
         )
 
     def _retrieve_legal_context(
@@ -60,17 +118,6 @@ class PetitionProcessingService:
             for index, chunk in enumerate(retrieved_chunks, start=1)
             if chunk.get("content")
         ) or "관련 법령 및 판례 검색 결과가 없습니다."
-
-    def enrich_petition_data(
-        self, request: PetitionDraftRequest
-    ) -> tuple[dict, RespondentData, EmploymentFacts, dict]:
-        comp_dict = request.complainant.model_dump()
-        return (
-            comp_dict,
-            request.respondent,
-            request.facts,
-            {},
-        )
 
     def _build_fallback_claim_reason(
         self,
@@ -102,24 +149,20 @@ class PetitionProcessingService:
 
     async def _generate_claim_reason_llm(
         self,
-        complainant_name: str,
+        complainant: ComplainantData,
         resp: RespondentData,
         facts: EmploymentFacts,
         user_statement: str,
         total_amount: int,
-        evidence_texts: list[str] | None = None,
+        legal_context: str,
+        evidence_texts: list[str],
     ) -> str:
         try:
-            legal_context = self._retrieve_legal_context(
-                facts,
-                user_statement,
-                evidence_texts or [],
-            )
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
+            llm = self._create_llm()
             chain = self.prompt | llm | StrOutputParser()
 
             input_payload = {
-                "complainant_name": complainant_name if not self._is_empty(complainant_name) else "[확인 필요: 진정인 성명]",
+                "complainant_name": complainant.name if not self._is_empty(complainant.name) else "[확인 필요: 진정인 성명]",
                 "company_name": resp.company_name if not self._is_empty(resp.company_name) else "[확인 필요: 회사명]",
                 "representative_name": resp.name if not self._is_empty(resp.name) else "[확인 필요: 대표자명]",
                 "company_address": resp.address if not self._is_empty(resp.address) else "[확인 필요: 사업장 주소]",
@@ -134,70 +177,66 @@ class PetitionProcessingService:
                 "total_amount": f"{total_amount:,}",
                 "user_statement": user_statement if not self._is_empty(user_statement) else "임금 체불로 인한 진정 제기",
                 "legal_context": legal_context,
+                "complainant_details": json.dumps(complainant.model_dump(mode="json", by_alias=True), ensure_ascii=False),
+                "respondent_details": json.dumps(resp.model_dump(mode="json", by_alias=True), ensure_ascii=False),
+                "facts_details": json.dumps(facts.model_dump(mode="json", by_alias=True), ensure_ascii=False),
+                "evidence_document": "\n".join(evidence_texts) or "제공된 증거 문서가 없습니다.",
             }
 
-            print(f"[DEBUG LLM INPUT] >>> {input_payload}")
             raw_response = await chain.ainvoke(input_payload)
             response_text = str(raw_response).strip() if raw_response is not None else ""
-            print(f"[DEBUG LLM OUTPUT] >>> raw: {repr(raw_response)}")
 
             if not response_text:
-                print("[DEBUG LLM FALLBACK] >>> 빈 응답 감지, 안전한 대체 문안을 사용합니다.")
                 return self._build_fallback_claim_reason(
-                    complainant_name,
-                    resp,
-                    facts,
-                    user_statement,
-                    evidence_texts or [],
-                    total_amount,
+                    complainant.name, resp, facts, user_statement, evidence_texts, total_amount
                 )
-
             return response_text
-        except Exception as e:
-            print(f"[DEBUG LLM ERROR] >>> {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
             return self._build_fallback_claim_reason(
-                complainant_name,
-                resp,
-                facts,
-                user_statement,
-                evidence_texts or [],
-                total_amount,
+                complainant.name, resp, facts, user_statement, evidence_texts, total_amount
             )
 
     async def generate_draft(
         self, request: PetitionDraftRequest
     ) -> PetitionDraftResponse:
-        enriched_comp_dict, enriched_resp, enriched_facts, inferred_facts = self.enrich_petition_data(request)
+        extracted = await self._extract_petition_data(request)
+        evidence_texts = []
+        if request.evidence_document:
+            evidence_texts = [
+                f"정제된 문서 텍스트: {request.evidence_document.extracted_text}",
+                f"문서 분석 요약: {request.evidence_document.analysis_summary}",
+            ]
 
+        legal_context = self._retrieve_legal_context(
+            extracted.facts,
+            extracted.user_summary,
+            evidence_texts,
+        )
         total_amount = (
-            enriched_facts.unpaid_wages
-            + enriched_facts.unpaid_severance_pay
-            + enriched_facts.unpaid_other_amount
+            extracted.facts.unpaid_wages
+            + extracted.facts.unpaid_severance_pay
+            + extracted.facts.unpaid_other_amount
         )
-
         claim_reason = await self._generate_claim_reason_llm(
-            complainant_name=enriched_comp_dict.get("name", ""),
-            resp=enriched_resp,
-            facts=enriched_facts,
-            user_statement=request.user_statement,
+            complainant=extracted.complainant,
+            resp=extracted.respondent,
+            facts=extracted.facts,
+            user_statement=extracted.user_summary,
             total_amount=total_amount,
-            evidence_texts=request.evidence_texts,
+            legal_context=legal_context,
+            evidence_texts=evidence_texts,
         )
 
-        from app.schemas.petition_schema import ComplainantData
         return PetitionDraftResponse(
             success=True,
             case_id=request.case_id,
-            complainant=ComplainantData(**enriched_comp_dict),
-            respondent=enriched_resp,
-            facts=enriched_facts,
+            complainant=extracted.complainant,
+            respondent=extracted.respondent,
+            facts=extracted.facts,
             content=GeneratedPetitionContent(
                 claim_reason=claim_reason,
                 target_labor_office=None,
                 total_unpaid_amount=total_amount,
-                inferred_facts=inferred_facts if inferred_facts else None,
             ),
         )
 
