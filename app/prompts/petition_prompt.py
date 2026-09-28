@@ -45,6 +45,14 @@ PETITION_SYSTEM_TEMPLATE = """\
 [3. 관련 법률 근거]
 {legal_context}
 
+[4. 추출된 전체 정보]
+진정인 상세 정보: {complainant_details}
+피진정인 상세 정보: {respondent_details}
+근로 사실관계 상세 정보: {facts_details}
+
+[5. 증거 문서 및 분석]
+{evidence_document}
+
 진정 취지 및 이유 본문:"""
 
 
@@ -68,5 +76,9 @@ def get_petition_prompt() -> PromptTemplate:
             "unpaid_other_amount",
             "user_statement",
             "legal_context",
+            "complainant_details",
+            "respondent_details",
+            "facts_details",
+            "evidence_document",
         ],
     )
