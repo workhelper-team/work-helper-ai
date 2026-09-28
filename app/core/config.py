@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL_NAME: str = "gemma2:2b" # 모델 체급이 매우 낮습니다, 테스트 및 서비스 시 변경 예정
 
-    OPENAI_API_KEY: str = ""
+    OPENAI_API_KEY: str = "test"
     OPENAI_MODEL_NAME: str = "gpt-4o-mini"
     
     LLM_TEMPERATURE: float = 0.2

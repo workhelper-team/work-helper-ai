@@ -23,6 +23,7 @@ psycopg[binary,pool]>=3.1.18
 pgvector>=0.2.5
 bs4>=0.0.2
 lxml>=6.1.3
+rank-bm25==0.2.2
 
 # --- Embeddings (CPU-friendly) ---
 sentence-transformers>=3.0.0
@@ -33,11 +34,6 @@ pytesseract>=0.3.10
 pillow>=10.0.0
 pymupdf>=1.24.0
 
-# PaddleOCR 기반 (v3.x 호환 버전 고정)
+# PaddleOCR
 paddlepaddle>=2.6.0
 paddleocr==3.7.0
-
-# [참고: GPU(CUDA) 가속 환경 구축 시]
-# 위의 'paddlepaddle' 대신 본인의 CUDA 버전에 맞는 GPU 패키지를 설치합니다:
-# pip install paddlepaddle-gpu
-# (예: CUDA 11.8 기준 -> pip install paddlepaddle-gpu==2.6.2.post118 -f https://www.paddlepaddle.org.cn/whl/linux/mkl/avx/stable.html)
