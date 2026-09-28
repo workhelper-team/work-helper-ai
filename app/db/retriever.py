@@ -5,6 +5,12 @@ from langchain_community.retrievers import BM25Retriever
 from app.db.connection import get_db_connection
 from app.db.embeddings import generate_embeddings
 
+## 1. BM25 인덱스 메모리 캐싱 (싱글톤 전역 변수)
+# 매 검색 요청마다 DB의 모든 문서를 읽고 BM25 인덱스를 만들면 속도가 수 초 이상 늦어지므로,
+# 서버 시작 시 1회만 메모리에 캐싱하여 0.01초 만에 검색되도록 구성
+_GLOBAL_LAW_BM25: Optional[BM25Retriever] = None
+_GLOBAL_PRECEDENT_BM25: Optional[BM25Retriever] = None
+
 ## -------------------------------
 ## ----- OCR 증거 분석에서 사용 -----
 ## -------------------------------
@@ -42,12 +48,6 @@ def search_similar_chunks(query: str, top_k: int = 4) -> List[Dict]:
 ## -------------------------------
 ## --- AI 노무 법률 상담에서 사용 ---
 ## -------------------------------
-
-## 1. BM25 인덱스 메모리 캐싱 (싱글톤 전역 변수)
-# 매 검색 요청마다 DB의 모든 문서를 읽고 BM25 인덱스를 만들면 속도가 수 초 이상 늦어지므로,
-# 서버 시작 시 1회만 메모리에 캐싱하여 0.01초 만에 검색되도록 구성
-_GLOBAL_LAW_BM25: Optional[BM25Retriever] = None
-_GLOBAL_PRECEDENT_BM25: Optional[BM25Retriever] = None
 
 ## 2. 최초 실행 시 DB의 전체 청크를 가져와 법령과 판례 각각의 BM25 리트리버를 메모리에 생성
 def init_bm25_retrievers():
@@ -127,8 +127,8 @@ def _combine_hybird_results(
 ## 4. 하이브리드 RAG 파이프라인 (Vector + BM25)
 def search_legal_context(
     query: str,
-    top_k_law: int = 3,
-    top_k_precedent: int = 2,
+    candidate_k_law: int = 10,
+    candidate_k_precedent: int = 10,
     include_precedents: bool = True,
     vector_weight: float = 0.6, # Vector 검색 가중치 60%
     bm25_weight: float = 0.4 # BM25 검색 가중치 40%
@@ -146,64 +146,58 @@ def search_legal_context(
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             
-            # 2-1. 법령 하이브리드 검색
-            # Vector 검색 SQL 실행
+            # 2-1. 법령 1차 하이브리드 검색
+            # Vector 검색 실행
             law_sql = """
                 SELECT content, metadata, (embedding <=> %s::vector) AS distance
                 FROM rag.legal_chunks
                 ORDER BY distance ASC
                 LIMIT %s;
             """
-            cursor.execute(law_sql, (str(query_embedding), top_k_law * 2)) # 융합을 위해 상위 K의 2배수 추출
+            cursor.execute(law_sql, (str(query_embedding), candidate_k_law))
             vector_laws = [
                 {"content": row[0], "metadata": row[1], "score": row[2]}
                 for row in cursor.fetchall()
             ]
             
             # BM25 키워드 검색 실행
-            _GLOBAL_LAW_BM25.k = top_k_law * 2 # BM25 추출 개수 설정
+            _GLOBAL_LAW_BM25.k = candidate_k_law # BM25 추출 개수 설정
             bm25_laws = _GLOBAL_LAW_BM25.invoke(query) # 검색 메소드 호출
             
-            # Vector 결과 + BM25 결과 융합 (RRF 방식 적용)
-            combined_laws = _combine_hybird_results(
+            # RRF로 융합된 1차 법령 후보 리스트
+            results["laws"] = _combine_hybird_results(
                 vector_results=vector_laws,
                 bm25_docs=bm25_laws,
                 vector_weight=vector_weight,
                 bm25_weight=bm25_weight
             )
             
-            # 요청 받은 top_k_law 개수만큼 상위 청크 슬라이싱
-            results["laws"] = combined_laws[:top_k_law]
-            
-            # 2-2. 판례 하이브리드 검색 (분쟁 질문일 경우만)
+            # 2-2. 판례 1차 하이브리드 검색 (분쟁 질문일 경우만)
             if include_precedents and _GLOBAL_PRECEDENT_BM25 is not None:
-                # Vector 검색 SQL 실행
+                # Vector 검색 실행
                 prec_sql = """
                     SELECT content, metadata, (embedding <=> %s::vector) AS distance
                     FROM rag.precedent_chunks
                     ORDER BY distance ASC
                     LIMIT %s;
                 """
-                cursor.execute(prec_sql, (str(query_embedding), top_k_precedent * 2)) # 융합을 위해 상위 K의 2배수 추출
+                cursor.execute(prec_sql, (str(query_embedding), candidate_k_precedent))
                 vector_precedents = [
                     {"content": row[0], "metadata": row[1], "score": row[2]}
                     for row in cursor.fetchall()
                 ]
                 
                 # BM25 키워드 검색 실행
-                _GLOBAL_PRECEDENT_BM25.k = top_k_precedent * 2 # BM25 추출 개수 설정
+                _GLOBAL_PRECEDENT_BM25.k = candidate_k_precedent
                 bm25_precedents = _GLOBAL_PRECEDENT_BM25.invoke(query)
                 
-                # Vector 결과 + BM25 결과 융합 (RRF 방식 적용)
-                combined_precedents = _combine_hybird_results(
+                # RRF로 융합된 1차 판례 후보 리스트
+                results["precedents"] = _combine_hybird_results(
                     vector_results=vector_precedents,
                     bm25_docs=bm25_precedents,
                     vector_weight=vector_weight,
                     bm25_weight=bm25_weight
                 )
-                
-                # 요청 받은 top_k_precedent 개수만큼 상위 청크 슬라이싱
-                results["precedents"] = combined_precedents[:top_k_precedent]
     
     # 3. 최종 결합 및 중복 제거된 법령/판례 검색 결과 반환
     return results
