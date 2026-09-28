@@ -6,6 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 
 from app.db.retriever import search_legal_context
+from app.db.reranker import rerank_documents
 from app.schemas.consultation_schema import ConsultationResponse, ConsultationRequest, Precedents
 from app.utils.formatters import format_full_chat_history
 from app.prompts.consultation_prompt import (
@@ -61,45 +62,56 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
     intent = rewrite_res.get("intent") # 사용자의 질문 의도 (법령 개념 or 법률 상담)
     include_precedents = (intent == "CASE_DISPUTE") # CASE_DISPUTE(분쟁) 시에만 판례 검색 포함
     
-    # 4. 하이브리드 RAG DB 검색 (BM25 + pgvector 융합된 RRF 방식)
-    retrieved_data = search_legal_context(
+    # 4. [RAG 1단계] 하이브리드 RAG DB 검색 (BM25 + pgvector 융합된 RRF 방식)
+    # Reranker 검증을 위해 법령/판례 각각 10개씩 검색
+    candidate_data = search_legal_context(
         query=rewritten_query,
-        top_k_law=3,
-        top_k_precedent=2,
-        include_precedents=include_precedents,
-        vector_weight=0.6, # 의미 검색 가중치 60%
-        bm25_weight=0.4 # 키워드 검색 가중치 40%
+        candidate_k_law=10, # 1차 법령 후보군 10개
+        candidate_k_precedent=10, # 1차 판례 후보군 10개
+        include_precedents=include_precedents
     )
     
-    print(f"[DEBUG] 원본 질문: {question}")
-    print(f"[DEBUG] 재작성된 질문: {rewritten_query}")
-    print(f"[DEBUG] 검색된 법령 수: {len(retrieved_data['laws'])}")
-    for i, law in enumerate(retrieved_data['laws']):
-        print(f"[DEBUG] 법령 {i+1} 내용: {law['content'][:50]}...")
+    # 4-1. [RAG 2단계] Cross-Encoder Reranking (정밀 재점수화)
+    # BGE-M3 Reranker로 10개 후보를 검증하여 질문과 진짜 관련 높은 상위 문서만 잘라냄
+    # 법령 10개 후보 중 Cross-Encoder 점수 상위 3개 선별
+    final_laws = rerank_documents(
+        query=rewritten_query,
+        documents=candidate_data["laws"],
+        top_k=3
+    )
     
-    # 4-1. 법령 컨텍스트 생성
+    # 판례 10개 후보 중 Cross-Encoder 점수 상위 2개 선별
+    final_precedents = []
+    if include_precedents and candidate_data.get("precedents"):
+        final_precedents = rerank_documents(
+            query=rewritten_query,
+            documents=candidate_data["precedents"],
+            top_k=2
+        )
+        
+    # 4-2. 재정렬된 최종 법령(Top-3) 컨텍스트 생성
     law_context_str = ""
-    for law in retrieved_data["laws"]:
+    for law in final_laws:
         law_context_str += f"- {law['content']}\n"
             
-    # 4-2. 법령 기반 사실 분석 실행
+    # 4-3. 법령 기반 사실 분석 실행
     analysis_chain = ChatPromptTemplate.from_template(ANALYSIS_PROMPT) | llm_json | parser
     analysis_res = await analysis_chain.ainvoke({
         "context": law_context_str,
         "question": rewritten_query
     })
     
-    # 4-3. 판례가 있을 경우 판결 전문 요약 및 스키마 규격 변환
+    # 4-4. 판례가 있을 경우 판결 전문 요약 및 스키마 규격 변환
     precedents_list: List[Precedents] = []
     
-    if include_precedents and retrieved_data.get("precedents"):
+    if include_precedents and final_precedents:
         prec_summary_chain = ChatPromptTemplate.from_template(PRECEDENT_SUMMARY_PROMPT) | llm_text | StrOutputParser()
         
-        # 사건 번호(case_number) 기준 중복 제거 및 단일 판례 비동기 요약
+        # 사건 번호(case_number) 기준 중복 제거
         seen_case_numbers = set()
         unique_precedents =[]
         
-        for prec in retrieved_data["precedents"]:
+        for prec in final_precedents:
             metadata = prec.get("metadata")
             case_no = metadata.get("case_number")
             if case_no and case_no in seen_case_numbers:
@@ -124,7 +136,7 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
                 content=summarized_content
             )
             
-        # 여러 판례를 동시에 병렬로 비동기 요약
+        # asyncio.gather로 판례를 비동기 동시 요약 (병렬 처리)
         precedents_list = await asyncio.gather(
             *[summarize_single_precedent(prec) for prec in unique_precedents]
         )
@@ -136,7 +148,7 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
         "analysis_data": json.dumps(analysis_res, ensure_ascii=False, indent=2)
     })
     
-    # 6. API 스키마 규격으로 최종 객체 반환
+    # 6. API 스키마 반환
     return ConsultationResponse(
         answer=answer_text,
         precedents=list(precedents_list)

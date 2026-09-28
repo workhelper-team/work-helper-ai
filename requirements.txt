@@ -28,6 +28,7 @@ rank-bm25==0.2.2
 # --- Embeddings (CPU-friendly) ---
 sentence-transformers>=3.0.0
 huggingface-hub>=0.23.0
+FlagEmbedding==1.4.2
 
 # --- OCR & Document Processing ---
 pytesseract>=0.3.10
