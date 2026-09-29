@@ -20,12 +20,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Package Application
+- name: Package Application
         run: |
           tar --exclude='./.git' \
               --exclude='./venv' \
               --exclude='./__pycache__' \
               --exclude='./.github' \
+              --exclude='deploy.tar.gz' \
               -czf deploy.tar.gz .
 
       - name: Upload Package to S3
