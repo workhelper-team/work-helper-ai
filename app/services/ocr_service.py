@@ -6,6 +6,7 @@ import mimetypes
 import os
 import re
 from enum import Enum
+from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -17,12 +18,13 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
 
-from app.core.config import settings
 from app.prompts.ocr_prompt import OCR_ANALYSIS_SYSTEM_PROMPT, OCR_ANALYSIS_USER_PROMPT
 from app.schemas.ocr_schema import EvidenceAnalysisRequest, EvidenceAnalysisResponse
 
 logger = logging.getLogger(__name__)
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 # ---------------------------------------------------------------------------
 # Tesseract 바이너리 경로 보정 (Windows 환경 기본 경로)
@@ -57,11 +59,12 @@ def _get_paddle_engine():
             from paddleocr import PaddleOCR
             logger.info("Initializing PaddleOCR engine...")
             # PaddleOCR 3.x: use_angle_cls -> use_textline_orientation로 대체됨
-            # enable_mkldnn 여부는 settings.OCR_PADDLE_ENABLE_MKLDNN(.env)로 제어
+            # enable_mkldnn 여부는 OCR_PADDLE_ENABLE_MKLDNN 환경변수(.env)로 제어
             _paddle_engine = PaddleOCR(
                 use_textline_orientation=True,
                 lang="korean",
-                enable_mkldnn=settings.OCR_PADDLE_ENABLE_MKLDNN,
+                enable_mkldnn=os.getenv("OCR_PADDLE_ENABLE_MKLDNN", "false").lower()
+                in {"1", "true", "t", "yes", "y", "on"},
             )
         except ImportError as e:
             logger.error(f"PaddleOCR 패키지가 설치되지 않았습니다: {e}")
@@ -170,17 +173,18 @@ def _execute_ocr_pipeline(
 
 def _create_analysis_llm() -> ChatOpenAI | ChatOllama:
     """환경 설정에 따라 문서 분석용 LLM을 생성합니다."""
-    if settings.USE_LOCAL_LLM:
+    temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+    if os.getenv("USE_LOCAL_LLM", "true").lower() in {"1", "true", "t", "yes", "y", "on"}:
         return ChatOllama(
-            base_url=settings.OLLAMA_BASE_URL,
-            model=settings.OLLAMA_MODEL_NAME,
-            temperature=settings.LLM_TEMPERATURE,
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            model=os.getenv("OLLAMA_MODEL_NAME", "gemma2:2b"),
+            temperature=temperature,
             reasoning=False,
         )
     return ChatOpenAI(
-        api_key=settings.OPENAI_API_KEY,
-        model=settings.OPENAI_MODEL_NAME,
-        temperature=settings.LLM_TEMPERATURE,
+        api_key=os.getenv("OPENAI_API_KEY", "test"),
+        model=os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini"),
+        temperature=temperature,
     )
 
 
@@ -222,7 +226,7 @@ async def analyze_evidence(
         content_type=content_type,
     )
 
-    engine_name = (settings.OCR_ENGINE or "tesseract").lower()
+    engine_name = (os.getenv("OCR_ENGINE") or "tesseract").lower()
     logger.info(
         "OCR_ENGINE resolved to '%s' (raw OS env var: %r)",
         engine_name,

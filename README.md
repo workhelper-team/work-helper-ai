@@ -15,7 +15,7 @@
 - Python 3.10+
 - FastAPI
 - Uvicorn
-- Pydantic / pydantic-settings
+- Pydantic
 
 ## 프로젝트 구조
 

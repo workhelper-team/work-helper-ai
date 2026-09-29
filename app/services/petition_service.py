@@ -1,11 +1,13 @@
 import json
+import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
-from app.core.config import settings
 from app.schemas.petition_schema import (
     ComplainantData,
     EmploymentFacts,
@@ -16,6 +18,8 @@ from app.schemas.petition_schema import (
 )
 from app.prompts.petition_prompt import get_petition_prompt
 from app.db.retriever import search_similar_chunks
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 class _ExtractedPetitionData(BaseModel):
@@ -38,13 +42,15 @@ class PetitionProcessingService:
 
     def _create_llm(self) -> ChatOllama | ChatOpenAI:
         """환경 설정에 따라 로컬 Ollama 또는 OpenAI 모델을 생성합니다."""
-        if settings.USE_LOCAL_LLM:
+        model_name = os.getenv("OLLAMA_MODEL_NAME", "gemma2:2b")
+        temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+        if os.getenv("USE_LOCAL_LLM", "true").lower() in {"1", "true", "t", "yes", "y", "on"}:
             ollama_args = {
-                "base_url": settings.OLLAMA_BASE_URL,
-                "model": settings.OLLAMA_MODEL_NAME,
-                "temperature": settings.LLM_TEMPERATURE,
+                "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+                "model": model_name,
+                "temperature": temperature,
             }
-            if "qwen" in settings.OLLAMA_MODEL_NAME.lower():
+            if "qwen" in model_name.lower():
                 try:
                     return ChatOllama(**ollama_args, reasoning=False)
                 except TypeError:
@@ -52,9 +58,9 @@ class PetitionProcessingService:
             return ChatOllama(**ollama_args)
 
         return ChatOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            model=settings.OPENAI_MODEL_NAME,
-            temperature=settings.LLM_TEMPERATURE,
+            api_key=os.getenv("OPENAI_API_KEY", "test"),
+            model=os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini"),
+            temperature=temperature,
         )
 
     async def _extract_petition_data(
