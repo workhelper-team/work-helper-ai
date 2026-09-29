@@ -1,0 +1,66 @@
+name: Deploy AI Server to EC2 via S3
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Package Application
+        run: |
+          tar --exclude='./.git' \
+              --exclude='./venv' \
+              --exclude='./__pycache__' \
+              --exclude='./.github' \
+              -czf deploy.tar.gz .
+
+      - name: Upload Package to S3
+        run: |
+          aws s3 cp deploy.tar.gz s3://${{ secrets.S3_BUCKET_NAME }}/deploy.tar.gz
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            echo "=== 1. Download Latest Package from S3 ==="
+            cd ~/work-helper-ai
+            aws s3 cp s3://${{ secrets.S3_BUCKET_NAME }}/deploy.tar.gz ./deploy.tar.gz
+            tar -xzf deploy.tar.gz
+            rm -f deploy.tar.gz
+
+            echo "=== 2. Rebuild Docker Image ==="
+            docker build -t work-helper-ai .
+
+            echo "=== 3. Restart Docker Container ==="
+            docker rm -f ai-container 2>/dev/null || true
+            docker run -d \
+              --name ai-container \
+              --restart always \
+              -p 8000:8000 \
+              -v /home/ubuntu/.cache/huggingface:/root/.cache/huggingface \
+              --env-file .env \
+              work-helper-ai
+
+            echo "=== 4. Clean Build Cache ==="
+            docker builder prune -a -f
+
+            echo "=== Deployment Completed Successfully ==="
