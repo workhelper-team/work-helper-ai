@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1
 # PaddleOCR/OpenCV 구동에 필요한 OS 라이브러리 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
