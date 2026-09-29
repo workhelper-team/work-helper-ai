@@ -26,12 +26,11 @@ jobs:
               --exclude='./venv' \
               --exclude='./__pycache__' \
               --exclude='./.github' \
-              --exclude='deploy.tar.gz' \
-              -czf deploy.tar.gz .
+              -czf /tmp/deploy.tar.gz .
 
       - name: Upload Package to S3
         run: |
-          aws s3 cp deploy.tar.gz s3://${{ secrets.S3_BUCKET_NAME }}/deploy.tar.gz
+          aws s3 cp /tmp/deploy.tar.gz s3://${{ secrets.S3_BUCKET_NAME }}/deploy.tar.gz
 
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1.0.3
