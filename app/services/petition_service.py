@@ -43,7 +43,7 @@ class PetitionProcessingService:
     def _create_llm(self) -> ChatOllama | ChatOpenAI:
         """환경 설정에 따라 로컬 Ollama 또는 OpenAI 모델을 생성합니다."""
         model_name = os.getenv("OLLAMA_MODEL_NAME", "gemma2:2b")
-        temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+        temperature = 0.2
         if os.getenv("USE_LOCAL_LLM", "true").lower() in {"1", "true", "t", "yes", "y", "on"}:
             ollama_args = {
                 "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),

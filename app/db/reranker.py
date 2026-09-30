@@ -1,4 +1,4 @@
-import torch
+import os
 from typing import List, Dict, Any
 from FlagEmbedding import FlagReranker
 
@@ -10,12 +10,23 @@ _GLOBAL_RERANKER: FlagReranker = None
 # Cross-Encoder 방식을 사용하여 질문과 문서 전체를 한 번에 입력받아 밀접도를 추론
 def get_reranker() -> FlagReranker:
     global _GLOBAL_RERANKER
-    if _GLOBAL_RERANKER is None:
-        # GPU가 사용 가능한 지 확인
-        use_gpu = torch.cuda.is_available()
-        # BAAI/bge-reranker-v2-m3 모델 로드 (Cross-Encoder 기반)
-        # use_fp16=True로 GPU 환경에서 메모리 절약 및 연산 속도 향상, CPU일 땐 False로 로드됨
-        _GLOBAL_RERANKER = FlagReranker("BAAI/bge-reranker-v2-m3", use_fp16=use_gpu)
+    if _GLOBAL_RERANKER is None: # 모델이 없다면 로드
+        model_name = "BAAI/bge-reranker-v2-m3" # 모델명 (Cross-Encoder 기반)
+        
+        # 1. 우선 오프라인 모드로 로컬 캐시 접근 시도
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        try:
+            _GLOBAL_RERANKER = FlagReranker(model_name, use_fp16=False)
+        except Exception:
+            # 2. 로컬 캐시에 모델이 없는 최초 실행 시 온라인으로 전환하여 모델 다운로드
+            print("{model_name} 모델을 다운로드합니다..")
+            os.environ["HF_HUB_OFFLINE"] = "0"
+            try:
+                _GLOBAL_RERANKER = FlagReranker(model_name, use_fp16=False)
+            finally:
+                # 3. 다운로드 완료 후 다시 오프라인 모드로 복원
+                os.environ["HF_HUB_OFFLINE"] = "1"
+        
     return _GLOBAL_RERANKER
 
 ## Cross-Encoder 재점수화
