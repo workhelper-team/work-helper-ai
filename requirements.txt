@@ -1,3 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+
 # --- Base Framework ---
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
