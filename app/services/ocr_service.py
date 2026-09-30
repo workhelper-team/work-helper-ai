@@ -173,7 +173,7 @@ def _execute_ocr_pipeline(
 
 def _create_analysis_llm() -> ChatOpenAI | ChatOllama:
     """환경 설정에 따라 문서 분석용 LLM을 생성합니다."""
-    temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+    temperature = 0.2
     if os.getenv("USE_LOCAL_LLM", "true").lower() in {"1", "true", "t", "yes", "y", "on"}:
         return ChatOllama(
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),

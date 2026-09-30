@@ -2,6 +2,7 @@ import json
 import asyncio
 from typing import List
 from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 
@@ -9,8 +10,8 @@ from app.db.retriever import search_legal_context
 from app.db.reranker import rerank_documents
 from app.schemas.consultation_schema import ConsultationResponse, ConsultationRequest, Precedents
 from app.utils.formatters import format_full_chat_history
+from app.utils.profanity_filter import contains_profanity
 from app.prompts.consultation_prompt import (
-    PROFANITY_PROMPT, # 욕설/비속어 포함 여부 필터링
     DOMAIN_CHECK_PROMPT, # 노동/노무 관련 질문인지 필터링
     QUERY_REWRITE_PROMPT, # 일상 용어를 법령 용어로 재작성 및 의도 분석
     ANALYSIS_PROMPT, # 법령 컨텍스트 기반 사실 분석
@@ -19,8 +20,14 @@ from app.prompts.consultation_prompt import (
 )
 
 ## LLM 선언
-llm_json = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind(response_format={"type": "json_object"}) # 분석용
-llm_text = ChatOpenAI(model="gpt-4o-mini", temperature=0.2) # 최종 답변용
+# 도메인 적합성 검증 모델
+domain_llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0)
+# 법률 용어로 쿼리 재작성 및 의도 분리
+rewrite_llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
+# 법률 기반 사건 분석 모델
+analysis_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind(response_format={"type": "json_object"})
+# 최종 답변 모델
+answer_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
 
 ## 파이프라인 시작 (비동기 처리)
 async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationResponse:
@@ -32,18 +39,19 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
     question = request.question # 사용자 질문
     
     # 1. 욕설/비속어 검증
-    profanity_chain = ChatPromptTemplate.from_template(PROFANITY_PROMPT) | llm_json | parser
-    profanity_res = await profanity_chain.ainvoke({"user_input": question})
-    
-    if not profanity_res.get("is_safe", True):
+    if contains_profanity(question):
         return ConsultationResponse(
             answer="질문하신 내용에 부적절한 표현이 감지되었습니다. 올바른 언어 사용을 부탁드리며 다시 질문해주시길 바랍니다.",
             precedents=[]
         )
-
+    
     # 2. 도메인 적합성 검증
-    domain_chain = ChatPromptTemplate.from_template(DOMAIN_CHECK_PROMPT) | llm_json | parser
-    domain_res = await domain_chain.ainvoke({"user_input": question})
+    domain_chain = ChatPromptTemplate.from_template(DOMAIN_CHECK_PROMPT) | domain_llm | StrOutputParser()
+    raw_domain_res = await domain_chain.ainvoke({"user_input": question})
+    try:
+        domain_res = json.loads(raw_domain_res.strip())
+    except json.JSONDecodeError:
+        domain_res = {"is_labor_domain": False} # 예외 발생 시 기본 통과 처리
     
     if not domain_res.get("is_labor_domain", True):
         return ConsultationResponse(
@@ -52,11 +60,20 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
         )
     
     # 3. 일상 용어 -> 법률 용어로 재작성 및 의도 분류
-    rewrite_chain = ChatPromptTemplate.from_template(QUERY_REWRITE_PROMPT) | llm_json | parser
-    rewrite_res = await rewrite_chain.ainvoke({
+    rewrite_chain = ChatPromptTemplate.from_template(QUERY_REWRITE_PROMPT) | rewrite_llm | StrOutputParser()
+    raw_rewrite_res = await rewrite_chain.ainvoke({
         "full_chat_history":full_chat_history,
         "question": question
     })
+    
+    try:
+        rewrite_res = json.loads(raw_rewrite_res.strip())
+    except json.JSONDecodeError:
+        return ConsultationResponse(
+            answer="답변을 생성하는 과정에서 예기치 못한 에러가 발생했습니다. 계속 문제가 발생한다면 관리자에게 문의해주세요.",
+            precedents=[]
+        )
+    print(rewrite_res)
     
     rewritten_query = rewrite_res.get("rewritten_query") # 재작성된 사용자 질문
     intent = rewrite_res.get("intent") # 사용자의 질문 의도 (법령 개념 or 법률 상담)
@@ -95,7 +112,7 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
         law_context_str += f"- {law['content']}\n"
             
     # 4-3. 법령 기반 사실 분석 실행
-    analysis_chain = ChatPromptTemplate.from_template(ANALYSIS_PROMPT) | llm_json | parser
+    analysis_chain = ChatPromptTemplate.from_template(ANALYSIS_PROMPT) | analysis_llm | parser
     analysis_res = await analysis_chain.ainvoke({
         "context": law_context_str,
         "question": rewritten_query
@@ -105,7 +122,7 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
     precedents_list: List[Precedents] = []
     
     if include_precedents and final_precedents:
-        prec_summary_chain = ChatPromptTemplate.from_template(PRECEDENT_SUMMARY_PROMPT) | llm_text | StrOutputParser()
+        prec_summary_chain = ChatPromptTemplate.from_template(PRECEDENT_SUMMARY_PROMPT) | answer_llm | StrOutputParser()
         
         # 사건 번호(case_number) 기준 중복 제거
         seen_case_numbers = set()
@@ -142,7 +159,7 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
         )
     
     # 5. 최종 답변 생성
-    final_chain = ChatPromptTemplate.from_template(FINAL_RESPONSE_PROMPT) | llm_text | StrOutputParser()
+    final_chain = ChatPromptTemplate.from_template(FINAL_RESPONSE_PROMPT) | answer_llm | StrOutputParser()
     answer_text = await final_chain.ainvoke({
         "full_chat_history": full_chat_history,
         "analysis_data": json.dumps(analysis_res, ensure_ascii=False, indent=2)
