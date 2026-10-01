@@ -46,16 +46,19 @@ jobs:
           script: |
             set -e
 
-            echo "=== 1. Download Latest Package from S3 ==="
+            echo "=== 1. Clean Dangling Images ==="
+            docker image prune -af
+
+            echo "=== 2. Download Latest Package from S3 ==="
             cd ~/work-helper-ai
             aws s3 cp s3://${{ secrets.S3_BUCKET_NAME }}/deploy.tar.gz ./deploy.tar.gz
             tar -xzf deploy.tar.gz
             rm -f deploy.tar.gz
 
-            echo "=== 2. Rebuild Docker Image ==="
+            echo "=== 3. Rebuild Docker Image ==="
             docker build -t work-helper-ai .
 
-            echo "=== 3. Restart Docker Container ==="
+            echo "=== 4. Restart Docker Container ==="
             docker rm -f ai-container 2>/dev/null || true
             docker run -d \
               --name ai-container \
@@ -65,23 +68,7 @@ jobs:
               --env-file .env \
               work-helper-ai
 
-            echo "=== 4. Clean Build Cache ==="
+            echo "=== 5. Clean Build Cache ==="
             docker builder prune -a -f
 
             echo "=== Deployment Completed Successfully ==="
-
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            # 1. 배포 전 미사용 이미지 및 빌드 캐시 자동 정리
-            docker image prune -af
-            
-            # 2. 최신 이미지 pull 및 재실행
-            docker pull ${{ secrets.DOCKER_USERNAME }}/my-ai-repo:latest
-            docker stop ai-container || true
-            docker rm ai-container || true
-            docker run -d --name ai-container --restart always -p 8000:8000 ...
