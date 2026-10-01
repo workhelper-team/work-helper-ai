@@ -99,7 +99,7 @@ def _infer_paddleocr(image: Image.Image) -> str:
     ocr = _get_paddle_engine()
     img_np = np.array(image.convert("RGB"))
 
-    # PaddleOCR 3.x: ocr.ocr()은 제거되었고 predict()가 OCRResult 객체 리스트를 반환
+    # PaddleOCR 3.x: predict()가 OCRResult 객체 리스트를 반환
     result = ocr.predict(img_np)
     if not result:
         return ""
