@@ -5,6 +5,7 @@ from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
+from starlette.concurrency import run_in_threadpool
 
 from app.db.retriever import search_legal_context
 from app.db.reranker import rerank_documents
@@ -81,7 +82,8 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
     
     # 4. [RAG 1단계] 하이브리드 RAG DB 검색 (BM25 + pgvector 융합된 RRF 방식)
     # Reranker 검증을 위해 법령/판례 각각 10개씩 검색
-    candidate_data = search_legal_context(
+    candidate_data = await run_in_threadpool(
+        search_legal_context,
         query=rewritten_query,
         candidate_k_law=10, # 1차 법령 후보군 10개
         candidate_k_precedent=10, # 1차 판례 후보군 10개
@@ -91,7 +93,8 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
     # 4-1. [RAG 2단계] Cross-Encoder Reranking (정밀 재점수화)
     # BGE-M3 Reranker로 10개 후보를 검증하여 질문과 진짜 관련 높은 상위 문서만 잘라냄
     # 법령 10개 후보 중 Cross-Encoder 점수 상위 3개 선별
-    final_laws = rerank_documents(
+    final_laws = await run_in_threadpool(
+        rerank_documents,
         query=rewritten_query,
         documents=candidate_data["laws"],
         top_k=3
@@ -100,7 +103,8 @@ async def labor_rag_pipeline(request: ConsultationRequest) -> ConsultationRespon
     # 판례 10개 후보 중 Cross-Encoder 점수 상위 2개 선별
     final_precedents = []
     if include_precedents and candidate_data.get("precedents"):
-        final_precedents = rerank_documents(
+        final_precedents = await run_in_threadpool(
+            rerank_documents,
             query=rewritten_query,
             documents=candidate_data["precedents"],
             top_k=2

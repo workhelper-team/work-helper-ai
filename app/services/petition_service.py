@@ -7,6 +7,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from app.schemas.petition_schema import (
     ComplainantData,
@@ -213,7 +214,8 @@ class PetitionProcessingService:
                 f"문서 분석 요약: {request.evidence_document.analysis_summary}",
             ]
 
-        legal_context = self._retrieve_legal_context(
+        legal_context = await run_in_threadpool(
+            self._retrieve_legal_context,
             extracted.facts,
             extracted.user_summary,
             evidence_texts,

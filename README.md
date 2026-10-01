@@ -144,8 +144,7 @@ flowchart LR
 │   ├── services/
 │   │   ├── consultation_service.py
 │   │   ├── ocr_service.py
-│   │   ├── petition_service.py
-│   │   └── workflow_service.py
+	│   │   └── petition_service.py
 │   ├── utils/
 │   │   ├── formatters.py
 │   │   └── rag_tester.py

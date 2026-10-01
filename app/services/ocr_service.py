@@ -19,6 +19,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
+from starlette.concurrency import run_in_threadpool
 
 from app.prompts.ocr_prompt import OCR_ANALYSIS_SYSTEM_PROMPT, OCR_ANALYSIS_USER_PROMPT
 from app.schemas.ocr_schema import EvidenceAnalysisRequest, EvidenceAnalysisResponse
@@ -243,7 +244,8 @@ async def analyze_evidence(
         raise ValueError(f"지원하지 않는 OCR_ENGINE 설정: {engine_name}")
 
     try:
-        extracted_text = _execute_ocr_pipeline(
+        extracted_text = await run_in_threadpool(
+            _execute_ocr_pipeline,
             file_bytes=file_bytes,
             document_type=document_type,
             infer_func=infer_func,
