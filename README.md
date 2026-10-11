@@ -7,14 +7,11 @@
 ![Amazon S3](https://img.shields.io/badge/Amazon_S3-569A31?style=flat-square&logo=amazons3&logoColor=white)
 ![Amazon EC2](https://img.shields.io/badge/Amazon_EC2-FF9900?style=flat-square&logo=amazonec2&logoColor=white)
 
+## 프로젝트 개요
+
 법률·행정 지원 서비스 WorkHelper의 AI 서버로, 노동법 상담, 증거 문서 분석, 임금체불 진정서 초안 작성과 법률 데이터 기반 검색을 제공합니다.
 
-## 프로젝트 소개 및 접속 링크
-
-- 프로젝트 소개: [내용 입력 필요]
-- 서비스 접속 주소: [내용 입력 필요]
-- API 문서: 로컬 실행 시 `http://localhost:8000/docs`
-- 상태 확인: `http://localhost:8000/health`
+[서비스 접속 링크](http://workhelper-front-bucket.s3-website.ap-northeast-2.amazonaws.com/)
 
 ## 팀 구성 및 역할 분담
 
@@ -29,10 +26,18 @@
 
 ## 시연 영상 및 서비스 화면
 
-| 구분 | 자료 |
-| --- | --- |
-| 시연 영상 | [내용 입력 필요] |
-| 서비스 화면 | ![서비스 화면](내용 입력 필요) |
+### 시연 영상
+[![](docs/images/fp-thumbnail.png)](https://youtu.be/jGwFLN5WKLM)
+
+### 서비스 화면
+
+| 메인화면 | 로그인 화면 | 사건 관리 화면 |
+| :---: | :---: | :---: |
+| ![](docs/images/main.png) | ![](docs/images/login.png) | ![](docs/images/mycase.png) |
+
+| AI 채팅 상담 화면 | 증거 서류 분석 화면 | 진정서 작성 초안 화면 |
+| :---: | :---: | :---: |
+| ![](docs/images/aichat.png) | ![](docs/images/ocr.png) | ![](docs/images/petition.png) |
 
 ## 주요 기능
 
