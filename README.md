@@ -13,6 +13,11 @@
 
 [서비스 접속 링크](http://workhelper-front-bucket.s3-website.ap-northeast-2.amazonaws.com/)
 
+## 프로젝트 보고서
+| 보고서 | 별첨 |
+| :---: | :---: |
+| [![](docs/images/report.png)](https://drive.google.com/file/d/1z77QWlTrn-q8-e5Nt0XfNtqUGK486Avh/view?usp=sharing) | [![](docs/images/etc.png)](https://drive.google.com/file/d/1F5LqKwR31_nzdSNEVt11HtvXAsZL0L_8/view?usp=sharing) |
+
 ## 팀 구성 및 역할 분담
 
 | 담당자 | 구분 | 역할 |
