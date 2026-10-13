@@ -1,5 +1,5 @@
 ![](docs/images/title_banner.png)
-<center><b><h3>
+<div align="center"><b><h3>
 <img src="https://img.shields.io/badge/React-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
 <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
 <img src="https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite">
@@ -42,7 +42,7 @@ AI를 활용해 노동자의 권리를 보호하고 피해 구제 절차를 지�
   </tr>
 </table>
 </br>
-</h3></b></center>
+</h3></b></div>
 
 # 프로젝트 보고서
 | 보고서 | 별첨 |
