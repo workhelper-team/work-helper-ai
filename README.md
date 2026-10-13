@@ -1,22 +1,61 @@
-# WorkHelper AI Server
+![](docs/images/title_banner.png)
+<center><b><h3>
+<img src="https://img.shields.io/badge/React-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
+<img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
+<img src="https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite">
+<img src="https://img.shields.io/badge/React_Router-CA4245?style=for-the-badge&logo=reactrouter&logoColor=white" alt="React Router">
+<img src="https://img.shields.io/badge/Axios-5A29E4?style=for-the-badge&logo=axios&logoColor=white" alt="Axios">
+</br>
+<img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java">
+<img src="https://img.shields.io/badge/Spring_Boot-6DB33F?style=for-the-badge&logo=springboot&logoColor=white" alt="Spring Boot">
+<img src="https://img.shields.io/badge/Spring_Security-6DB33F?style=for-the-badge&logo=springsecurity&logoColor=white" alt="Spring Security">
+<img src="https://img.shields.io/badge/JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white" alt="JWT">
+</br>
+<img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+<img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
+<img src="https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch">
+<img src="https://img.shields.io/badge/LangChain-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangChain">
+</br>
+<img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
+<img src="https://img.shields.io/badge/Redis-FF4438?style=for-the-badge&logo=redis&logoColor=white" alt="Redis">
+</br>
+<img src="https://img.shields.io/badge/Amazon_EC2-FF9900?style=for-the-badge&logo=amazonec2&logoColor=white" alt="Amazon EC2">
+<img src="https://img.shields.io/badge/Amazon_S3-569A31?style=for-the-badge&logo=amazons3&logoColor=white" alt="Amazon S3">
+<img src="https://img.shields.io/badge/Amazon_RDS-527FFF?style=for-the-badge&logo=amazonrds&logoColor=white" alt="Amazon RDS">
+<img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+<img src="https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white" alt="GitHub Actions">
+</br></br>
+AI를 활용해 노동자의 권리를 보호하고 피해 구제 절차를 지원합니다.</br>
+<a href="http://workhelper-front-bucket.s3-website.ap-northeast-2.amazonaws.com/">서비스 접속</a>
+ · 
+<a href="https://youtu.be/pZxNCfCDiNI">시연 영상</a>
+</br></br>
 
-![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white)
-![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white)
-![Amazon S3](https://img.shields.io/badge/Amazon_S3-569A31?style=flat-square&logo=amazons3&logoColor=white)
-![Amazon EC2](https://img.shields.io/badge/Amazon_EC2-FF9900?style=flat-square&logo=amazonec2&logoColor=white)
+<table border="1" width="75%">
+  <tr>
+    <td colspan="3" align="center"><b>GitHub Repository</b></td>
+  </tr>
+  <tr>
+    <td align="center" width="33.33%"><a href="https://github.com/workhelper-team/work-helper-frontend">프론트엔드</a></td>
+    <td align="center" width="33.33%"><a href="https://github.com/workhelper-team/work-helper-backend">백엔드</a></td>
+    <td align="center" width="33.33%"><a href="https://github.com/workhelper-team/work-helper-ai">AI 서버</a></td>
+  </tr>
+</table>
+</br>
+</h3></b></center>
+
+# 프로젝트 보고서
+| 보고서 | 별첨 |
+| :---: | :---: |
+| [![](docs/images/report.png)](https://drive.google.com/file/d/1z77QWlTrn-q8-e5Nt0XfNtqUGK486Avh/view?usp=sharing) | [![](docs/images/etc.png)](https://drive.google.com/file/d/1F5LqKwR31_nzdSNEVt11HtvXAsZL0L_8/view?usp=sharing) |
+
+# WorkHelper AI Server
 
 ## 프로젝트 개요
 
 법률·행정 지원 서비스 WorkHelper의 AI 서버로, 노동법 상담, 증거 문서 분석, 임금체불 진정서 초안 작성과 법률 데이터 기반 검색을 제공합니다.
 
 [서비스 접속 링크](http://workhelper-front-bucket.s3-website.ap-northeast-2.amazonaws.com/)
-
-## 프로젝트 보고서
-| 보고서 | 별첨 |
-| :---: | :---: |
-| [![](docs/images/report.png)](https://drive.google.com/file/d/1z77QWlTrn-q8-e5Nt0XfNtqUGK486Avh/view?usp=sharing) | [![](docs/images/etc.png)](https://drive.google.com/file/d/1F5LqKwR31_nzdSNEVt11HtvXAsZL0L_8/view?usp=sharing) |
 
 ## 팀 구성 및 역할 분담
 
@@ -32,7 +71,7 @@
 ## 시연 영상 및 서비스 화면
 
 ### 시연 영상
-[![](docs/images/fp-thumbnail.png)](https://youtu.be/jGwFLN5WKLM)
+[![](docs/images/fp-thumbnail.png)](https://youtu.be/pZxNCfCDiNI)
 
 ### 서비스 화면
 
