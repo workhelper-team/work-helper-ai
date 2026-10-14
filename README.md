@@ -28,7 +28,7 @@
 AI를 활용해 노동자의 권리를 보호하고 피해 구제 절차를 지원합니다.</br>
 <a href="http://workhelper-front-bucket.s3-website.ap-northeast-2.amazonaws.com/">서비스 접속</a>
  · 
-<a href="https://youtu.be/pZxNCfCDiNI">시연 영상</a>
+<a href="https://youtu.be/kuHNYSx85pk">시연 영상</a>
 </br></br>
 
 <table border="1" width="75%">
@@ -71,7 +71,7 @@ AI를 활용해 노동자의 권리를 보호하고 피해 구제 절차를 지�
 ## 시연 영상 및 서비스 화면
 
 ### 시연 영상
-[![](docs/images/fp-thumbnail.png)](https://youtu.be/pZxNCfCDiNI)
+[![](docs/images/fp-thumbnail.png)](https://youtu.be/kuHNYSx85pk)
 
 ### 서비스 화면
 
